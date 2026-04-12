@@ -1,0 +1,11 @@
+.gitignore
+LICENSE
+package.json
+pnpm-lock.yaml
+pnpm-workspace.yaml
+railway.json
+vercel.json
+apps
+packages
+docs
+scripts

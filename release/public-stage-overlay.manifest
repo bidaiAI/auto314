@@ -1,0 +1,14 @@
+README.md
+README.zh-CN.md
+TRADEMARKS.md
+docs/BASE_PROFILE.md
+docs/OFFICIAL_PARAMETERS.md
+docs/OPEN_SOURCE_RELEASE_POLICY.md
+docs/OPEN_SOURCE_RELEASE_POLICY.zh-CN.md
+docs/PUBLIC_RELEASE_BOUNDARY.md
+docs/PUBLIC_SANITIZATION_MAP.md
+docs/PUBLIC_STAGE_RELEASE.md
+scripts/prepare-public-stage.sh
+release/public-stage.manifest
+release/public-stage-overlay.manifest
+release/public-stage-overrides

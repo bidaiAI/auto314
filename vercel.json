@@ -1,0 +1,15 @@
+{
+  "installCommand": "pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm --filter @autonomous314/web build",
+  "outputDirectory": "apps/web/dist",
+  "rewrites": [
+    {
+      "source": "/api/coingecko/:path*",
+      "destination": "https://api.coingecko.com/:path*"
+    },
+    {
+      "source": "/((?!assets/|favicon.ico|robots.txt).*)",
+      "destination": "/index.html"
+    }
+  ]
+}
