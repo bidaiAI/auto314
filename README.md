@@ -25,6 +25,8 @@ If you are reading this repo for integration work, start here:
 - **Public-stage release flow:** [`docs/PUBLIC_STAGE_RELEASE.md`](docs/PUBLIC_STAGE_RELEASE.md)
 - **Security policy:** [`SECURITY.md`](SECURITY.md)
 - **Initial public release note:** [`docs/releases/2026-04-12-initial-public-release.md`](docs/releases/2026-04-12-initial-public-release.md)
+- **Contributing guide:** [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- **Changelog:** [`CHANGELOG.md`](CHANGELOG.md)
 - **Trademark / brand policy:** [`TRADEMARKS.md`](TRADEMARKS.md)
 - **Protocol integration:** [`docs/INTEGRATION.md`](docs/INTEGRATION.md)
 - **Metadata / socials / images:** [`docs/LAUNCH_METADATA.md`](docs/LAUNCH_METADATA.md)

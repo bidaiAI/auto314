@@ -25,6 +25,8 @@
 - **public-stage 发布流程：** [`docs/PUBLIC_STAGE_RELEASE.md`](docs/PUBLIC_STAGE_RELEASE.md)
 - **安全策略：** [`SECURITY.md`](SECURITY.md)
 - **首个公开版本说明：** [`docs/releases/2026-04-12-initial-public-release.zh-CN.md`](docs/releases/2026-04-12-initial-public-release.zh-CN.md)
+- **贡献指南：** [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- **更新日志：** [`CHANGELOG.md`](CHANGELOG.md)
 - **品牌 / 商标声明：** [`TRADEMARKS.md`](TRADEMARKS.md)
 - **协议接入总览：** [`docs/INTEGRATION.md`](docs/INTEGRATION.md)
 - **metadata / 社交链接 / 图片字段：** [`docs/LAUNCH_METADATA.md`](docs/LAUNCH_METADATA.md)
