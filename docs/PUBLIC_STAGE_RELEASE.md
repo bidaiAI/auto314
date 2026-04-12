@@ -33,6 +33,7 @@ Recommended rule:
 - contracts: reviewed release state,
 - frontend + backend: same compatible snapshot,
 - snapshot age: prefer **at least 48 hours old** unless a newer public hotfix is required,
+- README, integration docs, ABI artifacts, and interface files may be intentionally overlaid from the latest reviewed state when they define the public integration surface,
 - recent debugging-only work: may remain private until the next release,
 - P0 fixes for the released surface: must still be backported before publication.
 
@@ -58,9 +59,10 @@ This flow:
 
 1. copies the runnable product surface listed in `release/public-stage.manifest` from the chosen snapshot,
 2. overlays the current public-release docs and publication files listed in `release/public-stage-overlay.manifest`,
-3. applies common public overrides from `release/public-stage-overrides/`,
-4. applies any snapshot-specific backports from `release/public-stage-version-overrides/<git-short-sha>/`,
-5. leaves `.git/` in the target directory untouched.
+3. removes internal or non-release-facing files listed in `release/public-stage-prune.manifest`,
+4. applies common public overrides from `release/public-stage-overrides/`,
+5. applies any snapshot-specific backports from `release/public-stage-version-overrides/<git-short-sha>/`,
+6. leaves `.git/` in the target directory untouched.
 
 ### D. Review the stage directory
 

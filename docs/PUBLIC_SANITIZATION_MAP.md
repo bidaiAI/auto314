@@ -41,6 +41,7 @@ The public-stage flow uses:
 
 - snapshot manifest: `release/public-stage.manifest`
 - overlay manifest: `release/public-stage-overlay.manifest`
+- prune manifest: `release/public-stage-prune.manifest`
 - overrides: `release/public-stage-overrides/`
 - version-specific overrides: `release/public-stage-version-overrides/`
 - builder script: `scripts/prepare-public-stage.sh`

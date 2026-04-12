@@ -23,6 +23,8 @@ If you are reading this repo for integration work, start here:
 - **Open-source release policy:** [`docs/OPEN_SOURCE_RELEASE_POLICY.md`](docs/OPEN_SOURCE_RELEASE_POLICY.md)
 - **Public release boundary:** [`docs/PUBLIC_RELEASE_BOUNDARY.md`](docs/PUBLIC_RELEASE_BOUNDARY.md)
 - **Public-stage release flow:** [`docs/PUBLIC_STAGE_RELEASE.md`](docs/PUBLIC_STAGE_RELEASE.md)
+- **Security policy:** [`SECURITY.md`](SECURITY.md)
+- **Initial public release note:** [`docs/releases/2026-04-12-initial-public-release.md`](docs/releases/2026-04-12-initial-public-release.md)
 - **Trademark / brand policy:** [`TRADEMARKS.md`](TRADEMARKS.md)
 - **Protocol integration:** [`docs/INTEGRATION.md`](docs/INTEGRATION.md)
 - **Metadata / socials / images:** [`docs/LAUNCH_METADATA.md`](docs/LAUNCH_METADATA.md)

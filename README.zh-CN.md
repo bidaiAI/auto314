@@ -23,6 +23,8 @@
 - **开源发布策略：** [`docs/OPEN_SOURCE_RELEASE_POLICY.zh-CN.md`](docs/OPEN_SOURCE_RELEASE_POLICY.zh-CN.md)
 - **公开边界清单：** [`docs/PUBLIC_RELEASE_BOUNDARY.md`](docs/PUBLIC_RELEASE_BOUNDARY.md)
 - **public-stage 发布流程：** [`docs/PUBLIC_STAGE_RELEASE.md`](docs/PUBLIC_STAGE_RELEASE.md)
+- **安全策略：** [`SECURITY.md`](SECURITY.md)
+- **首个公开版本说明：** [`docs/releases/2026-04-12-initial-public-release.zh-CN.md`](docs/releases/2026-04-12-initial-public-release.zh-CN.md)
 - **品牌 / 商标声明：** [`TRADEMARKS.md`](TRADEMARKS.md)
 - **协议接入总览：** [`docs/INTEGRATION.md`](docs/INTEGRATION.md)
 - **metadata / 社交链接 / 图片字段：** [`docs/LAUNCH_METADATA.md`](docs/LAUNCH_METADATA.md)

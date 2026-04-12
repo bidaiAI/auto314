@@ -4,6 +4,7 @@ set -euo pipefail
 TOOL_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SNAPSHOT_MANIFEST_PATH="$TOOL_ROOT/release/public-stage.manifest"
 OVERLAY_MANIFEST_PATH="$TOOL_ROOT/release/public-stage-overlay.manifest"
+PRUNE_MANIFEST_PATH="$TOOL_ROOT/release/public-stage-prune.manifest"
 OVERRIDES_DIR="$TOOL_ROOT/release/public-stage-overrides"
 VERSION_OVERRIDES_ROOT="$TOOL_ROOT/release/public-stage-version-overrides"
 TARGET_DIR="${1:-$TOOL_ROOT/../auto314-public-stage}"
@@ -51,6 +52,13 @@ copy_manifest() {
 copy_manifest "$SNAPSHOT_MANIFEST_PATH" "$SOURCE_DIR"
 copy_manifest "$OVERLAY_MANIFEST_PATH" "$TOOL_ROOT"
 
+if [[ -f "$PRUNE_MANIFEST_PATH" ]]; then
+  while IFS= read -r path || [[ -n "$path" ]]; do
+    [[ -z "$path" || "$path" =~ ^# ]] && continue
+    rm -rf "$TMP_DIR/$path"
+  done < "$PRUNE_MANIFEST_PATH"
+fi
+
 if [[ -d "$OVERRIDES_DIR" ]]; then
   rsync -a "$OVERRIDES_DIR/" "$TMP_DIR/"
 fi
@@ -72,6 +80,7 @@ Prepared public-stage copy:
   source snapshot:  $SOURCE_DIR
   snapshot list:   $SNAPSHOT_MANIFEST_PATH
   release overlay: $OVERLAY_MANIFEST_PATH
+  release prune:   $PRUNE_MANIFEST_PATH
   overrides:       $OVERRIDES_DIR
   snapshot ref:    ${SNAPSHOT_REF:-unknown}
   version patch:   ${VERSION_OVERRIDE_DIR:-none}

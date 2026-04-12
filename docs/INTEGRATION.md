@@ -2,11 +2,28 @@
 
 This document describes how third-party frontends, wallets, bots, and indexers should integrate with the open launch protocol.
 
+## Start here by audience
+
+- **Wallet teams**
+  - Read this file first for lifecycle, read methods, route selection, and safe UI defaults.
+- **Trading bots**
+  - Read this file first for state rules, execution surfaces, and launch-family handling.
+- **Frontends / indexers**
+  - This file is the main integration reference.
+- **Current official deployment values**
+  - Use [`docs/OFFICIAL_PARAMETERS.md`](./OFFICIAL_PARAMETERS.md) for the current public factory, deployers, blocks, and runtime profile.
+- **Chain-specific deployments**
+  - Use [`docs/BASE_PROFILE.md`](./BASE_PROFILE.md) for the Base chain runtime profile, parameters, and indexer defaults.
+- **Metadata / social-link hydration**
+  - Use [`docs/LAUNCH_METADATA.md`](./LAUNCH_METADATA.md) when you need images and social links.
+
 The **protocol core is EVM-generic**. Examples in this document use the **official BSC profile**:
 
 - native asset: `BNB`
 - wrapped native asset: `WBNB`
 - canonical DEX: `PancakeSwap V2`
+
+The same integration surface applies to the **Base** runtime profile as well; only the chain-specific values change. Use [`docs/BASE_PROFILE.md`](./BASE_PROFILE.md) for Base-specific router, fee, whitelist, explorer, and indexer defaults.
 
 ## 1. Canonical architecture
 
@@ -36,6 +53,11 @@ The canonical graduation path is:
 - LP burned to `0x000000000000000000000000000000000000dEaD`
 
 The **official BSC production profile** uses `12 BNB`.
+
+Third-party integrations that do local previews should assume the official `12 BNB` profile currently implies:
+
+- `virtualTokenReserve = 107,036,752`
+- `virtualQuoteReserve = 4.60555128 BNB`
 
 Local/dev/test deployments may intentionally use a lower immutable target such as `0.2 native` for faster graduation testing.
 
@@ -75,8 +97,8 @@ Show:
 - `displayGraduationProgressBps()`
 - `remainingQuoteCapacity()`
 - `canSell(account)` / `sellUnlockBlock(account)`
-- `isPairGraduationCompatible()`
-- `pairPreloadedQuote()`
+- indexer `pairGraduationCompatible`
+- indexer `pairPreloadedQuote`
 - `creatorFeeSweepReady()`
 - `createdAt()` / `lastTradeAt()`
 
@@ -106,6 +128,7 @@ Show:
 - DEX price from `currentPriceQuotePerToken()`
 - pair reserves from `dexReserves()`
 - pair link
+- for taxed families, whether the viewed pool is registered via `isTaxablePool(pool)`
 - creator claim if caller is creator and `creatorClaimable() > 0`
 
 Hide/disable:
@@ -176,20 +199,16 @@ If a factory deployer supplies `address(0)` for the protocol fee recipient, the 
 - `previewSell(tokenAmount)`
 - `canSell(account)`
 - `sellUnlockBlock(account)`
-- `isPairClean()`
-- `isPairGraduationCompatible()`
-- `pairPreloadedQuote()`
 - `protocolClaimable()`
 - `creatorClaimable()`
 - `creatorFeeSweepReady()`
 - `createdAt()`
 - `lastTradeAt()`
 - `whitelistSnapshot()` for `b314` / `f314`
+- `isTaxablePool(pool)` for taxed families
 - `taxConfig()` for taxed families
 - `dexReserves()`
 - `pairSnapshot()`
-- `accountedNativeBalance()`
-- `unexpectedNativeBalance()`
 
 ## 5. Quote-preload compatibility
 
@@ -281,7 +300,7 @@ This event is the canonical handoff marker from bonding-phase indexing to pair-p
 
 Contains:
 
-- caller that triggered the sweep
+- caller that triggered the sweep (the caller does **not** receive the swept funds)
 - creator fee amount moved into the protocol fee vault
 
 This event only occurs while the launch is still in `Bonding314`, the launch is at least `180 days` old, and there have been no trades for at least `30 days`.
@@ -353,6 +372,8 @@ This avoids an always-hot unbounded backend while preserving a good UX.
 
 ## 9. Dynamic API mode with bounded cost
 
+### Discovery / hydration for third-party integrations
+
 If you prefer a live API instead of static snapshots, keep it bounded:
 
 - use a short in-memory cache TTL
@@ -381,7 +402,8 @@ This gives dynamic reads without turning the protocol into an unbounded analytic
 
 Recommended frontend data split:
 
-- **live chain reads** for current token state, previews, claimable amounts, cooldown checks, and pair compatibility
+- **live chain reads** for current token state, previews, claimable amounts, cooldown checks, and taxed-pool checks
+- **indexed snapshot fields** for pair compatibility / preload visibility
 - **token-scoped API reads** for launch lists, recent activity, and segmented candles
 - **static snapshot fallback** if the dynamic API is unavailable
 
@@ -398,14 +420,19 @@ These help frontends show history/chart freshness without treating cached API da
 
 Donation changes may happen outside the launch token event stream.
 
-If you want live donation visibility before graduation, also monitor:
+If you want live donation visibility before graduation, monitor:
 
 - WBNB transfers to the pair
 - pair reserve changes
 
-If not, you can still rely on:
+The indexed snapshot also exposes:
 
-- `pairPreloadedQuote()`
+- `pairPreloadedQuote`
+- `pairClean`
+- `pairGraduationCompatible`
+
+And the graduation event still includes:
+
 - `Graduated.preloadedQuoteAmount`
 
 ## 8. Safe product messaging
