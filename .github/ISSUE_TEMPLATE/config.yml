@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security issue
+    url: https://github.com/bidaiAI/auto314/security
+    about: For sensitive vulnerabilities, prefer private security reporting when available.
