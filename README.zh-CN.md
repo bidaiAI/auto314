@@ -30,7 +30,7 @@
 
 ## 官方渠道
 
-- **官推：** [@auto314cc](https://x.com/auto314cc)
+- **官推：** [@Auto314_CC](https://x.com/Auto314_CC)
 - **官方频道：** [@Autonomous314](https://t.me/Autonomous314)
 - **新币预警频道：** [@auto314_Alert](https://t.me/auto314_Alert)
 

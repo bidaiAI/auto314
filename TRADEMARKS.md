@@ -11,7 +11,7 @@ The following names and official identifiers are used by the official deployment
 - `Autonomous 314`
 - `auto314`
 - `auto314.cc`
-- `@auto314cc`
+- `@Auto314_CC`
 - `@Autonomous314`
 - `@auto314_Alert`
 

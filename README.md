@@ -30,7 +30,7 @@ If you are reading this repo for integration work, start here:
 
 ## Official channels
 
-- **Official X:** [@auto314cc](https://x.com/auto314cc)
+- **Official X:** [@Auto314_CC](https://x.com/Auto314_CC)
 - **Official Telegram channel:** [@Autonomous314](https://t.me/Autonomous314)
 - **Official alerts channel:** [@auto314_Alert](https://t.me/auto314_Alert)
 
