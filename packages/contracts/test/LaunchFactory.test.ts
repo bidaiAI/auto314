@@ -68,6 +68,76 @@ async function buildWhitelistTaxedInitCode(params: {
   return deployTx.data!;
 }
 
+async function buildWhitelistInitCode(params: {
+  name: string;
+  symbol: string;
+  metadataURI: string;
+  creator: string;
+  factory: string;
+  protocolFeeRecipient: string;
+  router: string;
+  graduationQuoteReserve: bigint;
+  whitelistThreshold: bigint;
+  whitelistSlotSize: bigint;
+  whitelistOpensAt?: bigint;
+  whitelistAddresses: string[];
+  launchModeId?: number;
+}) {
+  const Whitelist = await ethers.getContractFactory("LaunchTokenWhitelist");
+  const deployTx = await Whitelist.getDeployTransaction({
+    name: params.name,
+    symbol: params.symbol,
+    metadataURI: params.metadataURI,
+    creator: params.creator,
+    factory: params.factory,
+    protocolFeeRecipient: params.protocolFeeRecipient,
+    router: params.router,
+    graduationQuoteReserve: params.graduationQuoteReserve,
+    whitelistThreshold: params.whitelistThreshold,
+    whitelistSlotSize: params.whitelistSlotSize,
+    whitelistOpensAt: params.whitelistOpensAt ?? 0n,
+    whitelistAddresses: params.whitelistAddresses,
+    launchModeId: params.launchModeId ?? 2,
+  });
+
+  return deployTx.data!;
+}
+
+async function buildTaxedInitCode(params: {
+  name: string;
+  symbol: string;
+  metadataURI: string;
+  creator: string;
+  factory: string;
+  protocolFeeRecipient: string;
+  router: string;
+  graduationQuoteReserve: bigint;
+  launchModeId?: number;
+  taxBps: number;
+  burnShareBps: number;
+  treasuryShareBps: number;
+  treasuryWallet: string;
+}) {
+  const Taxed = await ethers.getContractFactory("LaunchTokenTaxed");
+  const deployTx = await Taxed.getDeployTransaction({
+    name: params.name,
+    symbol: params.symbol,
+    metadataURI: params.metadataURI,
+    creator: params.creator,
+    factory: params.factory,
+    protocolFeeRecipient: params.protocolFeeRecipient,
+    router: params.router,
+    graduationQuoteReserve: params.graduationQuoteReserve,
+    launchModeId: params.launchModeId ?? 3,
+    taxBps: params.taxBps,
+    burnShareBps: params.burnShareBps,
+    treasuryShareBps: params.treasuryShareBps,
+    treasuryWallet: params.treasuryWallet,
+  });
+
+  return deployTx.data!;
+}
+
 async function latestTimestamp() {
   const block = await ethers.provider.getBlock("latest");
   return BigInt(block?.timestamp ?? 0);
@@ -78,9 +148,34 @@ describe("LaunchFactory", function () {
   const WHITELIST_CREATE_FEE = ethers.parseEther("0.03");
   const GRADUATION_TARGET = ethers.parseEther("12");
   const DEFAULT_PROTOCOL_FEE_RECIPIENT = "0xC4187bE6b362DF625696d4a9ec5E6FA461CC0314";
+  const BSC_WHITELIST_THRESHOLDS = [ethers.parseEther("4"), ethers.parseEther("6"), ethers.parseEther("8")];
+  const BSC_WHITELIST_SLOT_SIZES = [
+    ethers.parseEther("0.1"),
+    ethers.parseEther("0.2"),
+    ethers.parseEther("0.5"),
+    ethers.parseEther("1")
+  ];
+  const BASE_WHITELIST_THRESHOLDS = [ethers.parseEther("1"), ethers.parseEther("2"), ethers.parseEther("3")];
+  const BASE_WHITELIST_SLOT_SIZES = [
+    ethers.parseEther("0.04"),
+    ethers.parseEther("0.1"),
+    ethers.parseEther("0.2"),
+    ethers.parseEther("0.5")
+  ];
 
-  async function deployFixture() {
+  async function deployFixture(options?: {
+    standardCreateFee?: bigint;
+    whitelistCreateFee?: bigint;
+    graduationTarget?: bigint;
+    whitelistThresholdPresets?: bigint[];
+    whitelistSlotSizePresets?: bigint[];
+  }) {
     const [owner, protocol, creator, treasury] = await ethers.getSigners();
+    const standardCreateFee = options?.standardCreateFee ?? STANDARD_CREATE_FEE;
+    const whitelistCreateFee = options?.whitelistCreateFee ?? WHITELIST_CREATE_FEE;
+    const graduationTarget = options?.graduationTarget ?? GRADUATION_TARGET;
+    const whitelistThresholdPresets = options?.whitelistThresholdPresets ?? BSC_WHITELIST_THRESHOLDS;
+    const whitelistSlotSizePresets = options?.whitelistSlotSizePresets ?? BSC_WHITELIST_SLOT_SIZES;
 
     const MockWNATIVE = await ethers.getContractFactory("MockERC20");
     const wbnb = await MockWNATIVE.deploy("Wrapped Native", "WNATIVE");
@@ -98,11 +193,11 @@ describe("LaunchFactory", function () {
     const standardDeployer = await StandardDeployer.deploy();
     await standardDeployer.waitForDeployment();
 
-    const WhitelistDeployer = await ethers.getContractFactory("LaunchTokenWhitelistDeployer");
+    const WhitelistDeployer = await ethers.getContractFactory("LaunchCreate2Deployer");
     const whitelistDeployer = await WhitelistDeployer.deploy();
     await whitelistDeployer.waitForDeployment();
 
-    const TaxedDeployer = await ethers.getContractFactory("LaunchTokenTaxedDeployer");
+    const TaxedDeployer = await ethers.getContractFactory("LaunchCreate2Deployer");
     const taxedDeployer = await TaxedDeployer.deploy();
     await taxedDeployer.waitForDeployment();
 
@@ -119,11 +214,15 @@ describe("LaunchFactory", function () {
       await whitelistDeployer.getAddress(),
       await taxedDeployer.getAddress(),
       await whitelistTaxedDeployer.getAddress(),
-      STANDARD_CREATE_FEE,
-      WHITELIST_CREATE_FEE,
-      GRADUATION_TARGET
+      standardCreateFee,
+      whitelistCreateFee,
+      graduationTarget,
+      whitelistThresholdPresets,
+      whitelistSlotSizePresets
     );
     await launchFactory.waitForDeployment();
+    await whitelistDeployer.setFactory(await launchFactory.getAddress());
+    await taxedDeployer.setFactory(await launchFactory.getAddress());
     await whitelistTaxedDeployer.setFactory(await launchFactory.getAddress());
 
     return {
@@ -167,6 +266,66 @@ describe("LaunchFactory", function () {
     expect(await launchFactory.createFeeForMode(3)).to.equal(STANDARD_CREATE_FEE);
     expect(await launchFactory.createFeeForMode(11)).to.equal(STANDARD_CREATE_FEE);
     expect(await launchFactory.createFeeForMode(12)).to.equal(WHITELIST_CREATE_FEE);
+    expect(await launchFactory.isAllowedWhitelistThreshold(ethers.parseEther("4"))).to.equal(true);
+    expect(await launchFactory.isAllowedWhitelistSlotSize(ethers.parseEther("0.1"))).to.equal(true);
+  });
+
+  it("supports a base-style whitelist preset profile without changing BSC defaults", async function () {
+    const { launchFactory, creator, protocol, mockRouter, standardDeployer, whitelistDeployer, taxedDeployer, whitelistTaxedDeployer } =
+      await deployFixture({
+        standardCreateFee: ethers.parseEther("0.005"),
+        whitelistCreateFee: ethers.parseEther("0.01"),
+        graduationTarget: ethers.parseEther("4"),
+        whitelistThresholdPresets: BASE_WHITELIST_THRESHOLDS,
+        whitelistSlotSizePresets: BASE_WHITELIST_SLOT_SIZES
+      });
+
+    expect(await launchFactory.createFee()).to.equal(ethers.parseEther("0.005"));
+    expect(await launchFactory.createFeeForMode(2)).to.equal(ethers.parseEther("0.01"));
+    expect(await launchFactory.graduationQuoteReserve()).to.equal(ethers.parseEther("4"));
+    expect(await launchFactory.router()).to.equal(await mockRouter.getAddress());
+    expect(await launchFactory.isAllowedWhitelistThreshold(ethers.parseEther("1"))).to.equal(true);
+    expect(await launchFactory.isAllowedWhitelistThreshold(ethers.parseEther("3"))).to.equal(true);
+    expect(await launchFactory.isAllowedWhitelistThreshold(ethers.parseEther("4"))).to.equal(false);
+    expect(await launchFactory.isAllowedWhitelistSlotSize(ethers.parseEther("0.04"))).to.equal(true);
+    expect(await launchFactory.isAllowedWhitelistSlotSize(ethers.parseEther("0.5"))).to.equal(true);
+    expect(await launchFactory.isAllowedWhitelistSlotSize(ethers.parseEther("0.02"))).to.equal(false);
+
+    const whitelistAddresses = Array.from({ length: 25 }, () => ethers.Wallet.createRandom().address);
+    const initCode = await buildWhitelistInitCode({
+      name: "Base Seats",
+      symbol: "BSEAT",
+      metadataURI: "ipfs://base-seats",
+      creator: creator.address,
+      factory: await launchFactory.getAddress(),
+      protocolFeeRecipient: protocol.address,
+      router: await mockRouter.getAddress(),
+      graduationQuoteReserve: ethers.parseEther("4"),
+      whitelistThreshold: ethers.parseEther("1"),
+      whitelistSlotSize: ethers.parseEther("0.04"),
+      whitelistOpensAt: 0n,
+      whitelistAddresses
+    });
+    const tx = await launchFactory.connect(creator).createWhitelistLaunch(
+      "Base Seats",
+      "BSEAT",
+      "ipfs://base-seats",
+      {
+        whitelistThreshold: ethers.parseEther("1"),
+        whitelistSlotSize: ethers.parseEther("0.04"),
+        whitelistOpensAt: 0,
+        whitelistAddresses
+      },
+      initCode,
+      { value: ethers.parseEther("0.01") }
+    );
+    const receipt = await tx.wait();
+    const launchCreatedLog = receipt!.logs.find((log) => "fragment" in log && log.fragment?.name === "LaunchCreated");
+    expect(launchCreatedLog).to.not.equal(undefined);
+    expect(await launchFactory.whitelistDeployer()).to.equal(await whitelistDeployer.getAddress());
+    expect(await launchFactory.standardDeployer()).to.equal(await standardDeployer.getAddress());
+    expect(await launchFactory.taxedDeployer()).to.equal(await taxedDeployer.getAddress());
+    expect(await launchFactory.whitelistTaxedDeployer()).to.equal(await whitelistTaxedDeployer.getAddress());
   });
 
   it("falls back to the default protocol fee recipient when zero is passed", async function () {
@@ -188,11 +347,11 @@ describe("LaunchFactory", function () {
     const standardDeployer = await StandardDeployer.deploy();
     await standardDeployer.waitForDeployment();
 
-    const WhitelistDeployer = await ethers.getContractFactory("LaunchTokenWhitelistDeployer");
+    const WhitelistDeployer = await ethers.getContractFactory("LaunchCreate2Deployer");
     const whitelistDeployer = await WhitelistDeployer.deploy();
     await whitelistDeployer.waitForDeployment();
 
-    const TaxedDeployer = await ethers.getContractFactory("LaunchTokenTaxedDeployer");
+    const TaxedDeployer = await ethers.getContractFactory("LaunchCreate2Deployer");
     const taxedDeployer = await TaxedDeployer.deploy();
     await taxedDeployer.waitForDeployment();
 
@@ -211,13 +370,65 @@ describe("LaunchFactory", function () {
       await whitelistTaxedDeployer.getAddress(),
       STANDARD_CREATE_FEE,
       WHITELIST_CREATE_FEE,
-      GRADUATION_TARGET
+      GRADUATION_TARGET,
+      BSC_WHITELIST_THRESHOLDS,
+      BSC_WHITELIST_SLOT_SIZES
     );
     await launchFactory.waitForDeployment();
+    await whitelistDeployer.setFactory(await launchFactory.getAddress());
+    await taxedDeployer.setFactory(await launchFactory.getAddress());
     await whitelistTaxedDeployer.setFactory(await launchFactory.getAddress());
 
     expect(await launchFactory.protocolFeeRecipient()).to.equal(DEFAULT_PROTOCOL_FEE_RECIPIENT);
     expect(await launchFactory.DEFAULT_PROTOCOL_FEE_RECIPIENT()).to.equal(DEFAULT_PROTOCOL_FEE_RECIPIENT);
+  });
+
+  it("reconciles forced native into protocol create fees", async function () {
+    const { creator, launchFactory, protocol } = await deployFixture();
+
+    const ForceSend = await ethers.getContractFactory("ForceSend");
+    const forceSend = await ForceSend.deploy({ value: ethers.parseEther("0.15") });
+    await forceSend.waitForDeployment();
+    await forceSend.boom(await launchFactory.getAddress());
+
+    await expect(launchFactory.connect(creator).reconcileUnexpectedNative())
+      .to.emit(launchFactory, "UnexpectedNativeReconciled")
+      .withArgs(creator.address, ethers.parseEther("0.15"));
+
+    expect(await launchFactory.accruedProtocolCreateFees()).to.equal(ethers.parseEther("0.15"));
+
+    const recipientBalanceBefore = await ethers.provider.getBalance(creator.address);
+    await launchFactory.connect(protocol).claimProtocolCreateFeesTo(creator.address);
+    expect(await ethers.provider.getBalance(creator.address)).to.equal(recipientBalanceBefore + ethers.parseEther("0.15"));
+    expect(await launchFactory.accruedProtocolCreateFees()).to.equal(0n);
+  });
+
+  it("lets support deployers recover forced native to their immutable owner", async function () {
+    const { creator, owner, standardDeployer, whitelistDeployer, taxedDeployer, whitelistTaxedDeployer } =
+      await deployFixture();
+
+    const ForceSend = await ethers.getContractFactory("ForceSend");
+    const deployers = [standardDeployer, whitelistDeployer, taxedDeployer, whitelistTaxedDeployer];
+    const amounts = [
+      ethers.parseEther("0.01"),
+      ethers.parseEther("0.02"),
+      ethers.parseEther("0.03"),
+      ethers.parseEther("0.04"),
+    ];
+
+    for (let i = 0; i < deployers.length; i += 1) {
+      const deployerContract = deployers[i];
+      const amount = amounts[i];
+      const forceSend = await ForceSend.deploy({ value: amount });
+      await forceSend.waitForDeployment();
+      await forceSend.boom(await deployerContract.getAddress());
+
+      const ownerBalanceBefore = await ethers.provider.getBalance(owner.address);
+      await deployerContract.connect(creator).recoverUnexpectedNative();
+
+      expect(await ethers.provider.getBalance(owner.address)).to.equal(ownerBalanceBefore + amount);
+      expect(await ethers.provider.getBalance(await deployerContract.getAddress())).to.equal(0n);
+    }
   });
 
   it("creates standard launches and records creator ownership", async function () {
@@ -238,8 +449,22 @@ describe("LaunchFactory", function () {
   });
 
   it("creates whitelist launches and charges the whitelist create fee", async function () {
-    const { creator, launchFactory } = await deployFixture();
+    const { creator, protocol, mockRouter, launchFactory } = await deployFixture();
     const whitelist = Array.from({ length: 20 }, (_, i) => ethers.Wallet.createRandom().address);
+    const initCode = await buildWhitelistInitCode({
+      name: "Beta",
+      symbol: "BETA",
+      metadataURI: "ipfs://beta",
+      creator: creator.address,
+      factory: await launchFactory.getAddress(),
+      protocolFeeRecipient: protocol.address,
+      router: await mockRouter.getAddress(),
+      graduationQuoteReserve: GRADUATION_TARGET,
+      whitelistThreshold: ethers.parseEther("4"),
+      whitelistSlotSize: ethers.parseEther("0.2"),
+      whitelistOpensAt: 0n,
+      whitelistAddresses: whitelist
+    });
 
     const tx = await launchFactory
       .connect(creator)
@@ -247,10 +472,13 @@ describe("LaunchFactory", function () {
         "Beta",
         "BETA",
         "ipfs://beta",
-        ethers.parseEther("4"),
-        ethers.parseEther("0.2"),
-        0,
-        whitelist,
+        {
+          whitelistThreshold: ethers.parseEther("4"),
+          whitelistSlotSize: ethers.parseEther("0.2"),
+          whitelistOpensAt: 0,
+          whitelistAddresses: whitelist
+        },
+        initCode,
         {
           value: WHITELIST_CREATE_FEE,
         }
@@ -265,11 +493,30 @@ describe("LaunchFactory", function () {
   });
 
   it("creates taxed standard launches and records the tax mode", async function () {
-    const { creator, launchFactory } = await deployFixture();
+    const { creator, protocol, mockRouter, launchFactory } = await deployFixture();
+    const initCode = await buildTaxedInitCode({
+      name: "TaxOne",
+      symbol: "T1",
+      metadataURI: "ipfs://tax-one",
+      creator: creator.address,
+      factory: await launchFactory.getAddress(),
+      protocolFeeRecipient: protocol.address,
+      router: await mockRouter.getAddress(),
+      graduationQuoteReserve: GRADUATION_TARGET,
+      taxBps: 100,
+      burnShareBps: 4000,
+      treasuryShareBps: 6000,
+      treasuryWallet: creator.address,
+    });
 
     const tx = await launchFactory
       .connect(creator)
-      .createTaxLaunch("TaxOne", "T1", "ipfs://tax-one", 100, 4000, 6000, creator.address, {
+      .createTaxLaunch("TaxOne", "T1", "ipfs://tax-one", {
+        taxBps: 100,
+        burnShareBps: 4000,
+        treasuryShareBps: 6000,
+        treasuryWallet: creator.address,
+      }, initCode, {
         value: STANDARD_CREATE_FEE,
       });
     const receipt = await tx.wait();
@@ -333,12 +580,35 @@ describe("LaunchFactory", function () {
   });
 
   it("rejects invalid taxed launch configurations", async function () {
-    const { creator, launchFactory } = await deployFixture();
+    const { creator, protocol, mockRouter, launchFactory } = await deployFixture();
+    const factoryAddress = await launchFactory.getAddress();
+    const routerAddress = await mockRouter.getAddress();
+
+    const buildInitCode = (treasuryWallet: string, burnShareBps: number, treasuryShareBps: number) =>
+      buildTaxedInitCode({
+        name: "BadSplit",
+        symbol: "BAD",
+        metadataURI: "ipfs://bad",
+        creator: creator.address,
+        factory: factoryAddress,
+        protocolFeeRecipient: protocol.address,
+        router: routerAddress,
+        graduationQuoteReserve: GRADUATION_TARGET,
+        taxBps: 100,
+        burnShareBps,
+        treasuryShareBps,
+        treasuryWallet,
+      });
 
     await expect(
       launchFactory
         .connect(creator)
-        .createTaxLaunch("BadSplit", "BAD", "ipfs://bad-split", 100, 4000, 5000, creator.address, {
+        .createTaxLaunch("BadSplit", "BAD", "ipfs://bad-split", {
+          taxBps: 100,
+          burnShareBps: 4000,
+          treasuryShareBps: 5000,
+          treasuryWallet: creator.address,
+        }, await buildInitCode(creator.address, 4000, 5000), {
           value: STANDARD_CREATE_FEE,
         })
     ).to.be.revertedWithCustomError(launchFactory, "InvalidTaxConfig");
@@ -346,7 +616,12 @@ describe("LaunchFactory", function () {
     await expect(
       launchFactory
         .connect(creator)
-        .createTaxLaunch("MissingTreasury", "BAD", "ipfs://bad-wallet", 100, 5000, 5000, ethers.ZeroAddress, {
+        .createTaxLaunch("MissingTreasury", "BAD", "ipfs://bad-wallet", {
+          taxBps: 100,
+          burnShareBps: 5000,
+          treasuryShareBps: 5000,
+          treasuryWallet: ethers.ZeroAddress,
+        }, await buildInitCode(ethers.ZeroAddress, 5000, 5000), {
           value: STANDARD_CREATE_FEE,
         })
     ).to.be.revertedWithCustomError(launchFactory, "InvalidTaxConfig");
@@ -354,7 +629,12 @@ describe("LaunchFactory", function () {
     await expect(
       launchFactory
         .connect(creator)
-        .createTaxLaunch("BurnOnlyWallet", "BAD", "ipfs://bad-burn", 100, 10000, 0, creator.address, {
+        .createTaxLaunch("BurnOnlyWallet", "BAD", "ipfs://bad-burn", {
+          taxBps: 100,
+          burnShareBps: 10000,
+          treasuryShareBps: 0,
+          treasuryWallet: creator.address,
+        }, await buildInitCode(creator.address, 10000, 0), {
           value: STANDARD_CREATE_FEE,
         })
     ).to.be.revertedWithCustomError(launchFactory, "InvalidTaxConfig");
@@ -362,7 +642,12 @@ describe("LaunchFactory", function () {
     await expect(
       launchFactory
         .connect(creator)
-        .createTaxLaunch("DeadTreasury", "BAD", "ipfs://bad-dead", 100, 5000, 5000, "0x000000000000000000000000000000000000dEaD", {
+        .createTaxLaunch("DeadTreasury", "BAD", "ipfs://bad-dead", {
+          taxBps: 100,
+          burnShareBps: 5000,
+          treasuryShareBps: 5000,
+          treasuryWallet: "0x000000000000000000000000000000000000dEaD",
+        }, await buildInitCode("0x000000000000000000000000000000000000dEaD", 5000, 5000), {
           value: STANDARD_CREATE_FEE,
         })
     ).to.be.revertedWithCustomError(launchFactory, "InvalidTaxConfig");
@@ -385,17 +670,35 @@ describe("LaunchFactory", function () {
   });
 
   it("creates a taxed launch with salt and atomically buys for the creator", async function () {
-    const { creator, launchFactory, treasury } = await deployFixture();
+    const { creator, protocol, mockRouter, launchFactory, treasury } = await deployFixture();
     const salt = ethers.keccak256(ethers.toUtf8Bytes("tax-atomic-with-salt"));
+    const initCode = await buildTaxedInitCode({
+      name: "TaxAtomic",
+      symbol: "T5314",
+      metadataURI: "ipfs://tax-atomic",
+      creator: creator.address,
+      factory: await launchFactory.getAddress(),
+      protocolFeeRecipient: protocol.address,
+      router: await mockRouter.getAddress(),
+      graduationQuoteReserve: GRADUATION_TARGET,
+      launchModeId: 7,
+      taxBps: 500,
+      burnShareBps: 4000,
+      treasuryShareBps: 6000,
+      treasuryWallet: treasury.address,
+    });
 
     const tx = await launchFactory.connect(creator).createTaxLaunchAndBuyWithSalt(
       "TaxAtomic",
       "T5314",
       "ipfs://tax-atomic",
-      500,
-      4000,
-      6000,
-      treasury.address,
+      {
+        taxBps: 500,
+        burnShareBps: 4000,
+        treasuryShareBps: 6000,
+        treasuryWallet: treasury.address,
+      },
+      initCode,
       salt,
       0,
       {
@@ -439,17 +742,34 @@ describe("LaunchFactory", function () {
   });
 
   it("creates a whitelist launch and atomically commits the creator seat", async function () {
-    const { creator, launchFactory } = await deployFixture();
+    const { creator, protocol, mockRouter, launchFactory } = await deployFixture();
     const whitelist = [creator.address, ...Array.from({ length: 19 }, () => ethers.Wallet.createRandom().address)];
+    const initCode = await buildWhitelistInitCode({
+      name: "Whitelist",
+      symbol: "WLT",
+      metadataURI: "ipfs://wlt",
+      creator: creator.address,
+      factory: await launchFactory.getAddress(),
+      protocolFeeRecipient: protocol.address,
+      router: await mockRouter.getAddress(),
+      graduationQuoteReserve: GRADUATION_TARGET,
+      whitelistThreshold: ethers.parseEther("4"),
+      whitelistSlotSize: ethers.parseEther("0.2"),
+      whitelistOpensAt: 0n,
+      whitelistAddresses: whitelist
+    });
 
     const tx = await launchFactory.connect(creator).createWhitelistLaunchAndCommit(
       "Whitelist",
       "WLT",
       "ipfs://wlt",
-      ethers.parseEther("4"),
-      ethers.parseEther("0.2"),
-      0,
-      whitelist,
+      {
+        whitelistThreshold: ethers.parseEther("4"),
+        whitelistSlotSize: ethers.parseEther("0.2"),
+        whitelistOpensAt: 0,
+        whitelistAddresses: whitelist
+      },
+      initCode,
       {
         value: WHITELIST_CREATE_FEE + ethers.parseEther("0.2"),
       }
@@ -547,18 +867,35 @@ describe("LaunchFactory", function () {
   });
 
   it("requires exact slot funding for atomic whitelist commit", async function () {
-    const { creator, launchFactory } = await deployFixture();
+    const { creator, protocol, mockRouter, launchFactory } = await deployFixture();
     const whitelist = [creator.address, ...Array.from({ length: 19 }, () => ethers.Wallet.createRandom().address)];
+    const initCode = await buildWhitelistInitCode({
+      name: "Whitelist",
+      symbol: "WLT",
+      metadataURI: "ipfs://wlt",
+      creator: creator.address,
+      factory: await launchFactory.getAddress(),
+      protocolFeeRecipient: protocol.address,
+      router: await mockRouter.getAddress(),
+      graduationQuoteReserve: GRADUATION_TARGET,
+      whitelistThreshold: ethers.parseEther("4"),
+      whitelistSlotSize: ethers.parseEther("0.2"),
+      whitelistOpensAt: 0n,
+      whitelistAddresses: whitelist
+    });
 
     await expect(
       launchFactory.connect(creator).createWhitelistLaunchAndCommit(
       "Whitelist",
       "WLT",
       "ipfs://wlt",
-      ethers.parseEther("4"),
-      ethers.parseEther("0.2"),
-      0,
-      whitelist,
+      {
+        whitelistThreshold: ethers.parseEther("4"),
+        whitelistSlotSize: ethers.parseEther("0.2"),
+        whitelistOpensAt: 0,
+        whitelistAddresses: whitelist
+      },
+      initCode,
       {
         value: WHITELIST_CREATE_FEE + ethers.parseEther("0.1"),
         }
@@ -568,6 +905,20 @@ describe("LaunchFactory", function () {
 
   it("blocks direct deployer calls that spoof the official factory", async function () {
     const { creator, protocol, mockRouter, launchFactory, standardDeployer, whitelistDeployer } = await deployFixture();
+    const whitelistInitCode = await buildWhitelistInitCode({
+      name: "SpoofWL",
+      symbol: "SWL",
+      metadataURI: "ipfs://spoof-wl",
+      creator: creator.address,
+      factory: await launchFactory.getAddress(),
+      protocolFeeRecipient: protocol.address,
+      router: await mockRouter.getAddress(),
+      graduationQuoteReserve: GRADUATION_TARGET,
+      whitelistThreshold: ethers.parseEther("4"),
+      whitelistSlotSize: ethers.parseEther("0.2"),
+      whitelistOpensAt: 0n,
+      whitelistAddresses: Array.from({ length: 20 }, () => ethers.Wallet.createRandom().address)
+    });
 
     await expect(
       standardDeployer.connect(creator).deploy({
@@ -585,22 +936,9 @@ describe("LaunchFactory", function () {
     ).to.be.revertedWithCustomError(standardDeployer, "Unauthorized");
 
     await expect(
-      whitelistDeployer.connect(creator).deploy({
-        name: "SpoofWL",
-        symbol: "SWL",
-        metadataURI: "ipfs://spoof-wl",
-        creator: creator.address,
-        factory: await launchFactory.getAddress(),
-        protocolFeeRecipient: protocol.address,
-        router: await mockRouter.getAddress(),
-        graduationQuoteReserve: GRADUATION_TARGET,
-        whitelistThreshold: ethers.parseEther("4"),
-        whitelistSlotSize: ethers.parseEther("0.2"),
-        whitelistOpensAt: 0,
-        whitelistAddresses: Array.from({ length: 20 }, () => ethers.Wallet.createRandom().address),
-        launchModeId: 2,
-        salt: ethers.keccak256(ethers.toUtf8Bytes("spoof-whitelist")),
-      })
+      whitelistDeployer
+        .connect(creator)
+        .deploy(ethers.keccak256(ethers.toUtf8Bytes("spoof-whitelist")), whitelistInitCode)
     ).to.be.revertedWithCustomError(whitelistDeployer, "Unauthorized");
   });
 
@@ -643,11 +981,25 @@ describe("LaunchFactory", function () {
   });
 
   it("supports delayed whitelist open for b314 and exposes scheduled state", async function () {
-    const { creator, launchFactory } = await deployFixture();
+    const { creator, protocol, mockRouter, launchFactory } = await deployFixture();
     const whitelist = Array.from({ length: 20 }, (_, i) =>
       i === 0 ? creator.address : ethers.Wallet.createRandom().address
     );
     const opensAt = (await latestTimestamp()) + 2n * 60n * 60n;
+    const initCode = await buildWhitelistInitCode({
+      name: "DelayedBeta",
+      symbol: "DBETA",
+      metadataURI: "ipfs://delayed-beta",
+      creator: creator.address,
+      factory: await launchFactory.getAddress(),
+      protocolFeeRecipient: protocol.address,
+      router: await mockRouter.getAddress(),
+      graduationQuoteReserve: GRADUATION_TARGET,
+      whitelistThreshold: ethers.parseEther("4"),
+      whitelistSlotSize: ethers.parseEther("0.2"),
+      whitelistOpensAt: opensAt,
+      whitelistAddresses: whitelist
+    });
 
     const tx = await launchFactory
       .connect(creator)
@@ -655,10 +1007,13 @@ describe("LaunchFactory", function () {
         "DelayedBeta",
         "DBETA",
         "ipfs://delayed-beta",
-        ethers.parseEther("4"),
-        ethers.parseEther("0.2"),
-        opensAt,
-        whitelist,
+        {
+          whitelistThreshold: ethers.parseEther("4"),
+          whitelistSlotSize: ethers.parseEther("0.2"),
+          whitelistOpensAt: opensAt,
+          whitelistAddresses: whitelist
+        },
+        initCode,
         { value: WHITELIST_CREATE_FEE }
       );
     const receipt = await tx.wait();
@@ -674,19 +1029,36 @@ describe("LaunchFactory", function () {
   });
 
   it("rejects delayed atomic whitelist commit for b314", async function () {
-    const { creator, launchFactory } = await deployFixture();
+    const { creator, protocol, mockRouter, launchFactory } = await deployFixture();
     const whitelist = [creator.address, ...Array.from({ length: 19 }, () => ethers.Wallet.createRandom().address)];
     const opensAt = (await latestTimestamp()) + 2n * 60n * 60n;
+    const initCode = await buildWhitelistInitCode({
+      name: "DelayedSeat",
+      symbol: "DSEAT",
+      metadataURI: "ipfs://delayed-seat",
+      creator: creator.address,
+      factory: await launchFactory.getAddress(),
+      protocolFeeRecipient: protocol.address,
+      router: await mockRouter.getAddress(),
+      graduationQuoteReserve: GRADUATION_TARGET,
+      whitelistThreshold: ethers.parseEther("4"),
+      whitelistSlotSize: ethers.parseEther("0.2"),
+      whitelistOpensAt: opensAt,
+      whitelistAddresses: whitelist
+    });
 
     await expect(
       launchFactory.connect(creator).createWhitelistLaunchAndCommit(
         "DelayedSeat",
         "DSEAT",
         "ipfs://delayed-seat",
-        ethers.parseEther("4"),
-        ethers.parseEther("0.2"),
-        opensAt,
-        whitelist,
+        {
+          whitelistThreshold: ethers.parseEther("4"),
+          whitelistSlotSize: ethers.parseEther("0.2"),
+          whitelistOpensAt: opensAt,
+          whitelistAddresses: whitelist
+        },
+        initCode,
         {
           value: WHITELIST_CREATE_FEE + ethers.parseEther("0.2"),
         }
@@ -788,21 +1160,38 @@ describe("LaunchFactory", function () {
   });
 
   it("rejects whitelist opens beyond the three-day scheduling window", async function () {
-    const { creator, launchFactory } = await deployFixture();
+    const { creator, protocol, mockRouter, launchFactory } = await deployFixture();
     const whitelist = Array.from({ length: 20 }, (_, i) =>
       i === 0 ? creator.address : ethers.Wallet.createRandom().address
     );
     const opensAt = (await latestTimestamp()) + 4n * 24n * 60n * 60n;
+    const initCode = await buildWhitelistInitCode({
+      name: "TooLate",
+      symbol: "TLATE",
+      metadataURI: "ipfs://too-late",
+      creator: creator.address,
+      factory: await launchFactory.getAddress(),
+      protocolFeeRecipient: protocol.address,
+      router: await mockRouter.getAddress(),
+      graduationQuoteReserve: GRADUATION_TARGET,
+      whitelistThreshold: ethers.parseEther("4"),
+      whitelistSlotSize: ethers.parseEther("0.2"),
+      whitelistOpensAt: opensAt,
+      whitelistAddresses: whitelist
+    });
 
     await expect(
       launchFactory.connect(creator).createWhitelistLaunch(
         "TooLate",
         "TLATE",
         "ipfs://too-late",
-        ethers.parseEther("4"),
-        ethers.parseEther("0.2"),
-        opensAt,
-        whitelist,
+        {
+          whitelistThreshold: ethers.parseEther("4"),
+          whitelistSlotSize: ethers.parseEther("0.2"),
+          whitelistOpensAt: opensAt,
+          whitelistAddresses: whitelist
+        },
+        initCode,
         { value: WHITELIST_CREATE_FEE }
       )
     ).to.be.reverted;
@@ -813,16 +1202,33 @@ describe("LaunchFactory", function () {
     const oversizedWhitelist = Array.from({ length: 61 }, (_, i) =>
       i === 0 ? creator.address : ethers.Wallet.createRandom().address
     );
+    const whitelistInitCode = await buildWhitelistInitCode({
+      name: "TooManyWL",
+      symbol: "TMWL",
+      metadataURI: "ipfs://too-many-wl",
+      creator: creator.address,
+      factory: await launchFactory.getAddress(),
+      protocolFeeRecipient: protocol.address,
+      router: await mockRouter.getAddress(),
+      graduationQuoteReserve: GRADUATION_TARGET,
+      whitelistThreshold: ethers.parseEther("4"),
+      whitelistSlotSize: ethers.parseEther("0.2"),
+      whitelistOpensAt: 0n,
+      whitelistAddresses: oversizedWhitelist
+    });
 
     await expect(
       launchFactory.connect(creator).createWhitelistLaunch(
         "TooManyWL",
         "TMWL",
         "ipfs://too-many-wl",
-        ethers.parseEther("4"),
-        ethers.parseEther("0.2"),
-        0,
-        oversizedWhitelist,
+        {
+          whitelistThreshold: ethers.parseEther("4"),
+          whitelistSlotSize: ethers.parseEther("0.2"),
+          whitelistOpensAt: 0,
+          whitelistAddresses: oversizedWhitelist
+        },
+        whitelistInitCode,
         { value: WHITELIST_CREATE_FEE }
       )
     ).to.be.reverted;
@@ -971,7 +1377,7 @@ describe("LaunchFactory", function () {
       .token as string;
     const token = await ethers.getContractAt("LaunchToken", tokenAddr);
 
-    await token.connect(creator).buy(0, { value: ethers.parseEther("0.1") });
+    await token.connect(creator).buy(0, { value: ethers.parseEther("4.2") });
 
     await launchFactory.connect(protocol).claimProtocolCreateFees();
     await launchFactory.connect(owner).setProtocolFeeRecipient(recipient.address);
@@ -1001,8 +1407,8 @@ describe("LaunchFactory", function () {
     const tokenB = receiptB!.logs.find((log) => "fragment" in log && log.fragment?.name === "LaunchCreated")!.args
       .token as string;
 
-    await (await ethers.getContractAt("LaunchToken", tokenA)).connect(creator).buy(0, { value: ethers.parseEther("0.1") });
-    await (await ethers.getContractAt("LaunchToken", tokenB)).connect(creator).buy(0, { value: ethers.parseEther("0.1") });
+    await (await ethers.getContractAt("LaunchToken", tokenA)).connect(creator).buy(0, { value: ethers.parseEther("4.2") });
+    await (await ethers.getContractAt("LaunchToken", tokenB)).connect(creator).buy(0, { value: ethers.parseEther("4.2") });
 
     await launchFactory.connect(protocol).batchClaimProtocolFees([tokenA, tokenB], protocol.address);
 
@@ -1029,7 +1435,7 @@ describe("LaunchFactory", function () {
 
     const launchA = await ethers.getContractAt("LaunchToken", tokenA);
     const launchB = await ethers.getContractAt("LaunchToken", tokenB);
-    await launchA.connect(creator).buy(0, { value: ethers.parseEther("0.1") });
+    await launchA.connect(creator).buy(0, { value: ethers.parseEther("4.2") });
 
     const [totalClaimed, claimedCount] = await launchFactory
       .connect(protocol)

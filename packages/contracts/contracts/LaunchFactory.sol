@@ -4,12 +4,12 @@ pragma solidity ^0.8.24;
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {LaunchTokenDeployer} from "./LaunchTokenDeployer.sol";
-import {LaunchTokenWhitelistDeployer} from "./LaunchTokenWhitelistDeployer.sol";
-import {LaunchTokenTaxedDeployer} from "./LaunchTokenTaxedDeployer.sol";
 import {LaunchCreate2Deployer} from "./LaunchCreate2Deployer.sol";
 
 contract LaunchFactory is Ownable {
     using Address for address payable;
+
+    address public constant DEAD_ADDRESS = 0x000000000000000000000000000000000000dEaD;
 
     enum LaunchMode {
         Unregistered,
@@ -38,6 +38,9 @@ contract LaunchFactory is Ownable {
     uint256 public immutable standardCreateFee;
     uint256 public immutable whitelistCreateFee;
 
+    mapping(uint256 => bool) private allowedWhitelistThresholds;
+    mapping(uint256 => bool) private allowedWhitelistSlotSizes;
+
     address public protocolFeeRecipient;
     uint256 public accruedProtocolCreateFees;
 
@@ -55,11 +58,13 @@ contract LaunchFactory is Ownable {
         string metadataURI
     );
     event ProtocolFeeRecipientUpdated(address indexed previousRecipient, address indexed newRecipient);
+    event UnexpectedNativeReconciled(address indexed caller, uint256 amount);
     event ProtocolCreateFeesClaimed(address indexed recipient, uint256 amount);
 
     error InsufficientCreateFee();
     error ZeroAddress();
     error InvalidGraduationConfig();
+    error InvalidWhitelistPreset();
     error NothingToClaim();
     error PendingProtocolCreateFees();
     error Unauthorized();
@@ -83,6 +88,18 @@ contract LaunchFactory is Ownable {
         uint16 burnShareBps;
         uint16 treasuryShareBps;
         address treasuryWallet;
+        bytes initCode;
+        bytes32 salt;
+    }
+
+    struct WhitelistLaunchConfig {
+        string name;
+        string symbol;
+        string metadataURI;
+        uint256 whitelistThreshold;
+        uint256 whitelistSlotSize;
+        uint256 whitelistOpensAt;
+        address[] whitelistAddresses;
         bytes initCode;
         bytes32 salt;
     }
@@ -111,7 +128,9 @@ contract LaunchFactory is Ownable {
         address whitelistTaxedDeployer_,
         uint256 standardCreateFee_,
         uint256 whitelistCreateFee_,
-        uint256 graduationQuoteReserve_
+        uint256 graduationQuoteReserve_,
+        uint256[] memory whitelistThresholdPresets_,
+        uint256[] memory whitelistSlotSizePresets_
     ) Ownable(owner_) {
         if (
             owner_ == address(0) || router_ == address(0) || standardDeployer_ == address(0)
@@ -119,6 +138,7 @@ contract LaunchFactory is Ownable {
                 || whitelistTaxedDeployer_ == address(0)
         ) revert ZeroAddress();
         if (graduationQuoteReserve_ == 0) revert InvalidGraduationConfig();
+        _configureWhitelistPresets(whitelistThresholdPresets_, whitelistSlotSizePresets_);
 
         router = router_;
         standardDeployer = standardDeployer_;
@@ -130,6 +150,14 @@ contract LaunchFactory is Ownable {
         standardCreateFee = standardCreateFee_;
         whitelistCreateFee = whitelistCreateFee_;
         graduationQuoteReserve = graduationQuoteReserve_;
+    }
+
+    function isAllowedWhitelistThreshold(uint256 threshold) external view returns (bool) {
+        return allowedWhitelistThresholds[threshold];
+    }
+
+    function isAllowedWhitelistSlotSize(uint256 slotSize) external view returns (bool) {
+        return allowedWhitelistSlotSizes[slotSize];
     }
 
     function createFee() external view returns (uint256) {
@@ -184,10 +212,8 @@ contract LaunchFactory is Ownable {
         string calldata name_,
         string calldata symbol_,
         string calldata metadataURI_,
-        uint256 whitelistThreshold,
-        uint256 whitelistSlotSize,
-        uint256 whitelistOpensAt,
-        address[] calldata whitelistAddresses
+        WhitelistConfigInput calldata whitelistConfig,
+        bytes calldata initCode
     ) external payable returns (address token) {
         bytes32 salt = keccak256(
             abi.encode(
@@ -195,13 +221,23 @@ contract LaunchFactory is Ownable {
                 launchesByCreator[msg.sender].length,
                 block.chainid,
                 uint8(2),
-                whitelistThreshold,
-                whitelistSlotSize,
-                whitelistOpensAt
+                whitelistConfig.whitelistThreshold,
+                whitelistConfig.whitelistSlotSize,
+                whitelistConfig.whitelistOpensAt
             )
         );
         token = _createWhitelistLaunch(
-            name_, symbol_, metadataURI_, whitelistThreshold, whitelistSlotSize, whitelistOpensAt, whitelistAddresses, salt
+            WhitelistLaunchConfig({
+                name: name_,
+                symbol: symbol_,
+                metadataURI: metadataURI_,
+                whitelistThreshold: whitelistConfig.whitelistThreshold,
+                whitelistSlotSize: whitelistConfig.whitelistSlotSize,
+                whitelistOpensAt: whitelistConfig.whitelistOpensAt,
+                whitelistAddresses: whitelistConfig.whitelistAddresses,
+                initCode: initCode,
+                salt: salt
+            })
         );
     }
 
@@ -209,14 +245,22 @@ contract LaunchFactory is Ownable {
         string calldata name_,
         string calldata symbol_,
         string calldata metadataURI_,
-        uint256 whitelistThreshold,
-        uint256 whitelistSlotSize,
-        uint256 whitelistOpensAt,
-        address[] calldata whitelistAddresses,
+        WhitelistConfigInput calldata whitelistConfig,
+        bytes calldata initCode,
         bytes32 salt
     ) external payable returns (address token) {
         token = _createWhitelistLaunch(
-            name_, symbol_, metadataURI_, whitelistThreshold, whitelistSlotSize, whitelistOpensAt, whitelistAddresses, salt
+            WhitelistLaunchConfig({
+                name: name_,
+                symbol: symbol_,
+                metadataURI: metadataURI_,
+                whitelistThreshold: whitelistConfig.whitelistThreshold,
+                whitelistSlotSize: whitelistConfig.whitelistSlotSize,
+                whitelistOpensAt: whitelistConfig.whitelistOpensAt,
+                whitelistAddresses: whitelistConfig.whitelistAddresses,
+                initCode: initCode,
+                salt: salt
+            })
         );
     }
 
@@ -224,10 +268,8 @@ contract LaunchFactory is Ownable {
         string calldata name_,
         string calldata symbol_,
         string calldata metadataURI_,
-        uint256 whitelistThreshold,
-        uint256 whitelistSlotSize,
-        uint256 whitelistOpensAt,
-        address[] calldata whitelistAddresses
+        WhitelistConfigInput calldata whitelistConfig,
+        bytes calldata initCode
     ) external payable returns (address token) {
         bytes32 salt = keccak256(
             abi.encode(
@@ -235,20 +277,23 @@ contract LaunchFactory is Ownable {
                 launchesByCreator[msg.sender].length,
                 block.chainid,
                 uint8(2),
-                whitelistThreshold,
-                whitelistSlotSize,
-                whitelistOpensAt
+                whitelistConfig.whitelistThreshold,
+                whitelistConfig.whitelistSlotSize,
+                whitelistConfig.whitelistOpensAt
             )
         );
         token = _createWhitelistLaunchAndCommit(
-            name_,
-            symbol_,
-            metadataURI_,
-            whitelistThreshold,
-            whitelistSlotSize,
-            whitelistOpensAt,
-            whitelistAddresses,
-            salt
+            WhitelistLaunchConfig({
+                name: name_,
+                symbol: symbol_,
+                metadataURI: metadataURI_,
+                whitelistThreshold: whitelistConfig.whitelistThreshold,
+                whitelistSlotSize: whitelistConfig.whitelistSlotSize,
+                whitelistOpensAt: whitelistConfig.whitelistOpensAt,
+                whitelistAddresses: whitelistConfig.whitelistAddresses,
+                initCode: initCode,
+                salt: salt
+            })
         );
     }
 
@@ -256,21 +301,22 @@ contract LaunchFactory is Ownable {
         string calldata name_,
         string calldata symbol_,
         string calldata metadataURI_,
-        uint256 whitelistThreshold,
-        uint256 whitelistSlotSize,
-        uint256 whitelistOpensAt,
-        address[] calldata whitelistAddresses,
+        WhitelistConfigInput calldata whitelistConfig,
+        bytes calldata initCode,
         bytes32 salt
     ) external payable returns (address token) {
         token = _createWhitelistLaunchAndCommit(
-            name_,
-            symbol_,
-            metadataURI_,
-            whitelistThreshold,
-            whitelistSlotSize,
-            whitelistOpensAt,
-            whitelistAddresses,
-            salt
+            WhitelistLaunchConfig({
+                name: name_,
+                symbol: symbol_,
+                metadataURI: metadataURI_,
+                whitelistThreshold: whitelistConfig.whitelistThreshold,
+                whitelistSlotSize: whitelistConfig.whitelistSlotSize,
+                whitelistOpensAt: whitelistConfig.whitelistOpensAt,
+                whitelistAddresses: whitelistConfig.whitelistAddresses,
+                initCode: initCode,
+                salt: salt
+            })
         );
     }
 
@@ -278,62 +324,50 @@ contract LaunchFactory is Ownable {
         string calldata name_,
         string calldata symbol_,
         string calldata metadataURI_,
-        uint16 taxBps,
-        uint16 burnShareBps,
-        uint16 treasuryShareBps,
-        address treasuryWallet
+        TaxConfigInput calldata taxConfig,
+        bytes calldata initCode
     ) external payable returns (address token) {
         bytes32 salt = keccak256(
-            abi.encode(msg.sender, launchesByCreator[msg.sender].length, block.chainid, uint8(3), taxBps)
+            abi.encode(msg.sender, launchesByCreator[msg.sender].length, block.chainid, uint8(3), taxConfig.taxBps)
         );
-        token = _createTaxLaunch(name_, symbol_, metadataURI_, taxBps, burnShareBps, treasuryShareBps, treasuryWallet, salt);
+        token = _createTaxLaunch(name_, symbol_, metadataURI_, taxConfig, initCode, salt);
     }
 
     function createTaxLaunchWithSalt(
         string calldata name_,
         string calldata symbol_,
         string calldata metadataURI_,
-        uint16 taxBps,
-        uint16 burnShareBps,
-        uint16 treasuryShareBps,
-        address treasuryWallet,
+        TaxConfigInput calldata taxConfig,
+        bytes calldata initCode,
         bytes32 salt
     ) external payable returns (address token) {
-        token = _createTaxLaunch(name_, symbol_, metadataURI_, taxBps, burnShareBps, treasuryShareBps, treasuryWallet, salt);
+        token = _createTaxLaunch(name_, symbol_, metadataURI_, taxConfig, initCode, salt);
     }
 
     function createTaxLaunchAndBuy(
         string calldata name_,
         string calldata symbol_,
         string calldata metadataURI_,
-        uint16 taxBps,
-        uint16 burnShareBps,
-        uint16 treasuryShareBps,
-        address treasuryWallet,
+        TaxConfigInput calldata taxConfig,
+        bytes calldata initCode,
         uint256 minTokenOut
     ) external payable returns (address token, uint256 tokenOut) {
         bytes32 salt = keccak256(
-            abi.encode(msg.sender, launchesByCreator[msg.sender].length, block.chainid, uint8(3), taxBps)
+            abi.encode(msg.sender, launchesByCreator[msg.sender].length, block.chainid, uint8(3), taxConfig.taxBps)
         );
-        (token, tokenOut) = _createTaxLaunchAndBuy(
-            name_, symbol_, metadataURI_, taxBps, burnShareBps, treasuryShareBps, treasuryWallet, salt, minTokenOut
-        );
+        (token, tokenOut) = _createTaxLaunchAndBuy(name_, symbol_, metadataURI_, taxConfig, initCode, salt, minTokenOut);
     }
 
     function createTaxLaunchAndBuyWithSalt(
         string calldata name_,
         string calldata symbol_,
         string calldata metadataURI_,
-        uint16 taxBps,
-        uint16 burnShareBps,
-        uint16 treasuryShareBps,
-        address treasuryWallet,
+        TaxConfigInput calldata taxConfig,
+        bytes calldata initCode,
         bytes32 salt,
         uint256 minTokenOut
     ) external payable returns (address token, uint256 tokenOut) {
-        (token, tokenOut) = _createTaxLaunchAndBuy(
-            name_, symbol_, metadataURI_, taxBps, burnShareBps, treasuryShareBps, treasuryWallet, salt, minTokenOut
-        );
+        (token, tokenOut) = _createTaxLaunchAndBuy(name_, symbol_, metadataURI_, taxConfig, initCode, salt, minTokenOut);
     }
 
     function createWhitelistTaxLaunch(
@@ -478,6 +512,15 @@ contract LaunchFactory is Ownable {
         amount = _claimProtocolCreateFees(recipient);
     }
 
+    function reconcileUnexpectedNative() external returns (uint256 amount) {
+        amount = _unexpectedNativeBalance();
+        if (amount == 0) revert NothingToClaim();
+
+        accruedProtocolCreateFees += amount;
+
+        emit UnexpectedNativeReconciled(msg.sender, amount);
+    }
+
     function batchClaimProtocolFees(address[] calldata tokens, address payable recipient)
         external
         returns (uint256 totalClaimed, uint256 claimedCount)
@@ -579,108 +622,86 @@ contract LaunchFactory is Ownable {
         tokenOut = ILaunchTokenFactoryActions(token).factoryBuyFor{value: buyValue}(msg.sender, minTokenOut);
     }
 
-    function _createWhitelistLaunch(
-        string calldata name_,
-        string calldata symbol_,
-        string calldata metadataURI_,
-        uint256 whitelistThreshold,
-        uint256 whitelistSlotSize,
-        uint256 whitelistOpensAt,
-        address[] calldata whitelistAddresses,
-        bytes32 salt
-    ) internal returns (address token) {
+    function _createWhitelistLaunch(WhitelistLaunchConfig memory config)
+        internal
+        returns (address token)
+    {
+        _validateWhitelistPreset(config.whitelistThreshold, config.whitelistSlotSize);
         uint256 remainder = _collectCreateFee(whitelistCreateFee);
         if (remainder > 0) {
             payable(msg.sender).sendValue(remainder);
         }
-        LaunchTokenWhitelistDeployer.DeployConfig memory config = LaunchTokenWhitelistDeployer.DeployConfig({
-            name: name_,
-            symbol: symbol_,
-            metadataURI: metadataURI_,
-            creator: msg.sender,
-            factory: address(this),
-            protocolFeeRecipient: protocolFeeRecipient,
-            router: router,
-            graduationQuoteReserve: graduationQuoteReserve,
-            whitelistThreshold: whitelistThreshold,
-            whitelistSlotSize: whitelistSlotSize,
-            whitelistOpensAt: whitelistOpensAt,
-            whitelistAddresses: whitelistAddresses,
-            launchModeId: 2,
-            salt: salt
-        });
-        token = LaunchTokenWhitelistDeployer(whitelistDeployer).deploy(config);
-        _registerLaunch(token, msg.sender, name_, symbol_, metadataURI_, LaunchMode.WhitelistB314);
+        token = _deployWhitelist(config);
+        _registerLaunch(token, msg.sender, config.name, config.symbol, config.metadataURI, LaunchMode.WhitelistB314);
     }
 
-    function _createWhitelistLaunchAndCommit(
-        string calldata name_,
-        string calldata symbol_,
-        string calldata metadataURI_,
-        uint256 whitelistThreshold,
-        uint256 whitelistSlotSize,
-        uint256 whitelistOpensAt,
-        address[] calldata whitelistAddresses,
-        bytes32 salt
-    ) internal returns (address token) {
-        if (whitelistOpensAt > block.timestamp) revert DelayedWhitelistAtomicCommitUnsupported();
+    function _createWhitelistLaunchAndCommit(WhitelistLaunchConfig memory config)
+        internal
+        returns (address token)
+    {
+        if (config.whitelistOpensAt > block.timestamp) revert DelayedWhitelistAtomicCommitUnsupported();
+        _validateWhitelistPreset(config.whitelistThreshold, config.whitelistSlotSize);
         uint256 commitValue = _collectCreateFee(whitelistCreateFee);
-        if (commitValue != whitelistSlotSize) revert InvalidWhitelistAtomicCommitAmount();
+        if (commitValue != config.whitelistSlotSize) revert InvalidWhitelistAtomicCommitAmount();
 
-        LaunchTokenWhitelistDeployer.DeployConfig memory config = LaunchTokenWhitelistDeployer.DeployConfig({
-            name: name_,
-            symbol: symbol_,
-            metadataURI: metadataURI_,
-            creator: msg.sender,
-            factory: address(this),
-            protocolFeeRecipient: protocolFeeRecipient,
-            router: router,
-            graduationQuoteReserve: graduationQuoteReserve,
-            whitelistThreshold: whitelistThreshold,
-            whitelistSlotSize: whitelistSlotSize,
-            whitelistOpensAt: whitelistOpensAt,
-            whitelistAddresses: whitelistAddresses,
-            launchModeId: 2,
-            salt: salt
-        });
-        token = LaunchTokenWhitelistDeployer(whitelistDeployer).deploy(config);
-        _registerLaunch(token, msg.sender, name_, symbol_, metadataURI_, LaunchMode.WhitelistB314);
+        token = _deployWhitelist(config);
+        _registerLaunch(token, msg.sender, config.name, config.symbol, config.metadataURI, LaunchMode.WhitelistB314);
         ILaunchTokenWhitelistFactoryActions(token).factoryCommitWhitelistSeat{value: commitValue}(msg.sender);
+    }
+
+    function _deployWhitelist(WhitelistLaunchConfig memory config)
+        internal
+        returns (address token)
+    {
+        if (config.initCode.length == 0) revert InvalidWhitelistPreset();
+
+        token = LaunchCreate2Deployer(whitelistDeployer).predict(config.salt, keccak256(config.initCode));
+        pendingModeOf[token] = LaunchMode.WhitelistB314;
+        token = LaunchCreate2Deployer(whitelistDeployer).deploy(config.salt, config.initCode);
+        if (modeOf[token] != LaunchMode.Unregistered || pendingModeOf[token] != LaunchMode.WhitelistB314) {
+            revert InvalidWhitelistPreset();
+        }
+        pendingModeOf[token] = LaunchMode.Unregistered;
+
+        ILaunchTokenWhitelistInspection launch = ILaunchTokenWhitelistInspection(token);
+        if (
+            launch.creator() != msg.sender || launch.factory() != address(this)
+                || launch.protocolFeeRecipient() != protocolFeeRecipient || launch.router() != router
+                || launch.graduationQuoteReserve() != graduationQuoteReserve
+                || launch.launchMode() != uint8(LaunchMode.WhitelistB314)
+                || keccak256(bytes(launch.name())) != keccak256(bytes(config.name))
+                || keccak256(bytes(launch.symbol())) != keccak256(bytes(config.symbol))
+                || keccak256(bytes(launch.metadataURI())) != keccak256(bytes(config.metadataURI))
+        ) revert InvalidWhitelistPreset();
+
+        (, uint256 opensAt, uint256 deadline, uint256 threshold, uint256 slotSize,,,,) = launch.whitelistSnapshot();
+        uint256 expectedOpensAt = config.whitelistOpensAt == 0 ? block.timestamp : config.whitelistOpensAt;
+        if (
+            threshold != config.whitelistThreshold || slotSize != config.whitelistSlotSize
+                || opensAt != expectedOpensAt || deadline != expectedOpensAt + 24 hours
+        ) revert InvalidWhitelistPreset();
+        for (uint256 i = 0; i < config.whitelistAddresses.length; i++) {
+            if (!launch.isWhitelisted(config.whitelistAddresses[i])) revert InvalidWhitelistPreset();
+        }
     }
 
     function _createTaxLaunch(
         string calldata name_,
         string calldata symbol_,
         string calldata metadataURI_,
-        uint16 taxBps,
-        uint16 burnShareBps,
-        uint16 treasuryShareBps,
-        address treasuryWallet,
+        TaxConfigInput calldata taxConfig,
+        bytes calldata initCode,
         bytes32 salt
     ) internal returns (address token) {
-        LaunchMode mode = _standardTaxModeFor(taxBps);
-        _validateTaxConfig(taxBps, burnShareBps, treasuryShareBps, treasuryWallet);
+        LaunchMode mode = _standardTaxModeFor(taxConfig.taxBps);
+        _validateTaxConfig(
+            taxConfig.taxBps, taxConfig.burnShareBps, taxConfig.treasuryShareBps, taxConfig.treasuryWallet
+        );
         uint256 remainder = _collectCreateFee(standardCreateFee);
         if (remainder > 0) {
             payable(msg.sender).sendValue(remainder);
         }
-        LaunchTokenTaxedDeployer.DeployConfig memory config = LaunchTokenTaxedDeployer.DeployConfig({
-            name: name_,
-            symbol: symbol_,
-            metadataURI: metadataURI_,
-            creator: msg.sender,
-            factory: address(this),
-            protocolFeeRecipient: protocolFeeRecipient,
-            router: router,
-            graduationQuoteReserve: graduationQuoteReserve,
-            launchModeId: uint8(mode),
-            taxBps: taxBps,
-            burnShareBps: burnShareBps,
-            treasuryShareBps: treasuryShareBps,
-            treasuryWallet: treasuryWallet,
-            salt: salt
-        });
-        token = LaunchTokenTaxedDeployer(taxedDeployer).deploy(config);
+        token = _deployTaxed(name_, symbol_, metadataURI_, taxConfig, initCode, salt, mode);
         _registerLaunch(token, msg.sender, name_, symbol_, metadataURI_, mode);
     }
 
@@ -688,37 +709,54 @@ contract LaunchFactory is Ownable {
         string calldata name_,
         string calldata symbol_,
         string calldata metadataURI_,
-        uint16 taxBps,
-        uint16 burnShareBps,
-        uint16 treasuryShareBps,
-        address treasuryWallet,
+        TaxConfigInput calldata taxConfig,
+        bytes calldata initCode,
         bytes32 salt,
         uint256 minTokenOut
     ) internal returns (address token, uint256 tokenOut) {
-        LaunchMode mode = _standardTaxModeFor(taxBps);
-        _validateTaxConfig(taxBps, burnShareBps, treasuryShareBps, treasuryWallet);
+        LaunchMode mode = _standardTaxModeFor(taxConfig.taxBps);
+        _validateTaxConfig(
+            taxConfig.taxBps, taxConfig.burnShareBps, taxConfig.treasuryShareBps, taxConfig.treasuryWallet
+        );
         uint256 buyValue = _collectCreateFee(standardCreateFee);
         if (buyValue == 0) revert MissingAtomicBuyValue();
 
-        LaunchTokenTaxedDeployer.DeployConfig memory config = LaunchTokenTaxedDeployer.DeployConfig({
-            name: name_,
-            symbol: symbol_,
-            metadataURI: metadataURI_,
-            creator: msg.sender,
-            factory: address(this),
-            protocolFeeRecipient: protocolFeeRecipient,
-            router: router,
-            graduationQuoteReserve: graduationQuoteReserve,
-            launchModeId: uint8(mode),
-            taxBps: taxBps,
-            burnShareBps: burnShareBps,
-            treasuryShareBps: treasuryShareBps,
-            treasuryWallet: treasuryWallet,
-            salt: salt
-        });
-        token = LaunchTokenTaxedDeployer(taxedDeployer).deploy(config);
+        token = _deployTaxed(name_, symbol_, metadataURI_, taxConfig, initCode, salt, mode);
         _registerLaunch(token, msg.sender, name_, symbol_, metadataURI_, mode);
         tokenOut = ILaunchTokenFactoryActions(token).factoryBuyFor{value: buyValue}(msg.sender, minTokenOut);
+    }
+
+    function _deployTaxed(
+        string calldata name_,
+        string calldata symbol_,
+        string calldata metadataURI_,
+        TaxConfigInput calldata taxConfig,
+        bytes calldata initCode,
+        bytes32 salt,
+        LaunchMode mode
+    ) internal returns (address token) {
+        if (initCode.length == 0) revert InvalidTaxConfig();
+        token = LaunchCreate2Deployer(taxedDeployer).predict(salt, keccak256(initCode));
+        pendingModeOf[token] = mode;
+        token = LaunchCreate2Deployer(taxedDeployer).deploy(salt, initCode);
+        if (modeOf[token] != LaunchMode.Unregistered || pendingModeOf[token] != mode) revert InvalidTaxConfig();
+        delete pendingModeOf[token];
+
+        ILaunchTokenTaxedInspection launch = ILaunchTokenTaxedInspection(token);
+        if (
+            launch.creator() != msg.sender || launch.factory() != address(this)
+                || launch.protocolFeeRecipient() != protocolFeeRecipient || launch.router() != router
+                || launch.graduationQuoteReserve() != graduationQuoteReserve || launch.launchMode() != uint8(mode)
+                || keccak256(bytes(launch.name())) != keccak256(bytes(name_))
+                || keccak256(bytes(launch.symbol())) != keccak256(bytes(symbol_))
+                || keccak256(bytes(launch.metadataURI())) != keccak256(bytes(metadataURI_))
+        ) revert InvalidTaxConfig();
+
+        (bool enabled, uint16 configuredTaxBps, uint16 burnBps, uint16 treasuryBps, address wallet,) = launch.taxConfig();
+        if (
+            !enabled || configuredTaxBps != taxConfig.taxBps || burnBps != taxConfig.burnShareBps
+                || treasuryBps != taxConfig.treasuryShareBps || wallet != taxConfig.treasuryWallet
+        ) revert InvalidTaxConfig();
     }
 
     function _createWhitelistTaxLaunch(WhitelistTaxLaunchConfig memory config)
@@ -726,6 +764,7 @@ contract LaunchFactory is Ownable {
         returns (address token)
     {
         _validateTaxConfig(config.taxBps, config.burnShareBps, config.treasuryShareBps, config.treasuryWallet);
+        _validateWhitelistPreset(config.whitelistThreshold, config.whitelistSlotSize);
         uint256 remainder = _collectCreateFee(whitelistCreateFee);
         if (remainder > 0) {
             payable(msg.sender).sendValue(remainder);
@@ -739,6 +778,7 @@ contract LaunchFactory is Ownable {
         returns (address token)
     {
         _validateTaxConfig(config.taxBps, config.burnShareBps, config.treasuryShareBps, config.treasuryWallet);
+        _validateWhitelistPreset(config.whitelistThreshold, config.whitelistSlotSize);
         if (config.whitelistOpensAt > block.timestamp) revert DelayedWhitelistAtomicCommitUnsupported();
         uint256 commitValue = _collectCreateFee(whitelistCreateFee);
         if (commitValue != config.whitelistSlotSize) revert InvalidWhitelistAtomicCommitAmount();
@@ -808,6 +848,33 @@ contract LaunchFactory is Ownable {
         emit LaunchCreated(creator_, token, uint8(mode), name_, symbol_, metadataURI_);
     }
 
+    function _configureWhitelistPresets(
+        uint256[] memory whitelistThresholdPresets_,
+        uint256[] memory whitelistSlotSizePresets_
+    ) internal {
+        if (whitelistThresholdPresets_.length == 0 || whitelistSlotSizePresets_.length == 0) {
+            revert InvalidWhitelistPreset();
+        }
+
+        for (uint256 i = 0; i < whitelistThresholdPresets_.length; i++) {
+            uint256 preset = whitelistThresholdPresets_[i];
+            if (preset == 0) revert InvalidWhitelistPreset();
+            allowedWhitelistThresholds[preset] = true;
+        }
+
+        for (uint256 i = 0; i < whitelistSlotSizePresets_.length; i++) {
+            uint256 preset = whitelistSlotSizePresets_[i];
+            if (preset == 0) revert InvalidWhitelistPreset();
+            allowedWhitelistSlotSizes[preset] = true;
+        }
+    }
+
+    function _validateWhitelistPreset(uint256 whitelistThreshold, uint256 whitelistSlotSize) internal view {
+        if (!allowedWhitelistThresholds[whitelistThreshold] || !allowedWhitelistSlotSizes[whitelistSlotSize]) {
+            revert InvalidWhitelistPreset();
+        }
+    }
+
     function _claimProtocolCreateFees(address payable recipient) internal returns (uint256 amount) {
         if (msg.sender != protocolFeeRecipient) revert Unauthorized();
         if (recipient == address(0)) revert ZeroAddress();
@@ -818,6 +885,14 @@ contract LaunchFactory is Ownable {
         recipient.sendValue(amount);
 
         emit ProtocolCreateFeesClaimed(recipient, amount);
+    }
+
+    function _unexpectedNativeBalance() internal view returns (uint256 amount) {
+        uint256 actualBalance = address(this).balance;
+        if (actualBalance <= accruedProtocolCreateFees) {
+            return 0;
+        }
+        return actualBalance - accruedProtocolCreateFees;
     }
 
     function _standardTaxModeFor(uint16 taxBps) internal pure returns (LaunchMode) {
@@ -847,6 +922,7 @@ contract LaunchFactory is Ownable {
         if (burnShareBps + treasuryShareBps != 10_000) revert InvalidTaxConfig();
         if (treasuryShareBps > 0 && treasuryWallet == address(0)) revert InvalidTaxConfig();
         if (treasuryShareBps == 0 && treasuryWallet != address(0)) revert InvalidTaxConfig();
+        if (treasuryWallet == DEAD_ADDRESS) revert InvalidTaxConfig();
     }
 }
 
@@ -891,6 +967,22 @@ interface ILaunchTokenWhitelistInspection {
             uint256 committedTotal,
             uint256 tokensPerSeat
         );
+    function taxConfig()
+        external
+        view
+        returns (bool enabled, uint16 taxBps, uint16 burnShareBps, uint16 treasuryShareBps, address treasuryWallet, bool active);
+}
+
+interface ILaunchTokenTaxedInspection {
+    function name() external view returns (string memory);
+    function symbol() external view returns (string memory);
+    function metadataURI() external view returns (string memory);
+    function creator() external view returns (address);
+    function factory() external view returns (address);
+    function protocolFeeRecipient() external view returns (address);
+    function router() external view returns (address);
+    function graduationQuoteReserve() external view returns (uint256);
+    function launchMode() external view returns (uint8);
     function taxConfig()
         external
         view

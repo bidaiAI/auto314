@@ -8,8 +8,9 @@ describe("LaunchToken", function () {
   const MEDIUM_BUY = ethers.parseEther("0.1");
   const OVERBUY = ethers.parseEther("1");
 
-  async function deployFixture() {
+  async function deployFixture(options?: { graduationTarget?: bigint }) {
     const [deployer, creator, protocol, buyer, seller, other] = await ethers.getSigners();
+    const graduationTarget = options?.graduationTarget ?? GRADUATION_TARGET;
 
     const MockWNATIVE = await ethers.getContractFactory("MockERC20");
     const wbnb = await MockWNATIVE.deploy("Wrapped Native", "WNATIVE");
@@ -32,7 +33,7 @@ describe("LaunchToken", function () {
       factory: deployer.address,
       protocolFeeRecipient: protocol.address,
       router: await mockRouter.getAddress(),
-      graduationQuoteReserve: GRADUATION_TARGET,
+      graduationQuoteReserve: graduationTarget,
       launchModeId: 1,
     });
     await token.waitForDeployment();
@@ -40,7 +41,7 @@ describe("LaunchToken", function () {
     const pairAddress = await token.pair();
     const pair = await ethers.getContractAt("MockDexV2Pair", pairAddress);
 
-    return { deployer, creator, protocol, buyer, seller, other, wbnb, mockFactory, mockRouter, token, pair };
+    return { deployer, creator, protocol, buyer, seller, other, wbnb, mockFactory, mockRouter, token, pair, graduationTarget };
   }
 
   async function mineBlock() {
@@ -59,8 +60,6 @@ describe("LaunchToken", function () {
     expect(await token.saleTokenReserve()).to.equal(ethers.parseEther("800000000"));
     expect(await token.lpTokenReserve()).to.equal(ethers.parseEther("200000000"));
     expect(await token.graduationQuoteReserve()).to.equal(GRADUATION_TARGET);
-    expect(await token.isPairClean()).to.equal(true);
-    expect(await token.isPairGraduationCompatible()).to.equal(true);
     expect(await pair.totalSupply()).to.equal(0n);
   });
 
@@ -85,6 +84,56 @@ describe("LaunchToken", function () {
     ).to.not.be.reverted;
 
     expect(await token.balanceOf(buyer.address)).to.be.gt(0n);
+  });
+
+  it("treats transfer-to-contract during bonding as an auto-sell", async function () {
+    const { token, buyer } = await deployFixture();
+
+    await token.connect(buyer).buy(0, { value: SMALL_BUY });
+    await mineBlock();
+
+    const balance = await token.balanceOf(buyer.address);
+    const sellAmount = balance / 2n;
+    const preview = await token.previewSell(sellAmount);
+    const nativeBefore = await ethers.provider.getBalance(buyer.address);
+
+    const tx = await token.connect(buyer).transfer(await token.getAddress(), sellAmount);
+    const receipt = await tx.wait();
+    const gasPaid = receipt!.gasUsed * receipt!.gasPrice;
+
+    expect(await token.balanceOf(buyer.address)).to.equal(balance - sellAmount);
+    expect(await ethers.provider.getBalance(buyer.address)).to.equal(nativeBefore + preview[1] - gasPaid);
+
+    const sellEvent = receipt!.logs.find((log) => "fragment" in log && log.fragment?.name === "SellExecuted");
+    expect(sellEvent).to.not.equal(undefined);
+    expect(sellEvent!.args.seller).to.equal(buyer.address);
+    expect(sellEvent!.args.tokenIn).to.equal(sellAmount);
+    expect(sellEvent!.args.netQuoteOut).to.equal(preview[1]);
+  });
+
+  it("treats transferFrom-to-contract during bonding as an auto-sell for the token owner", async function () {
+    const { token, buyer, other } = await deployFixture();
+
+    await token.connect(buyer).buy(0, { value: SMALL_BUY });
+    await mineBlock();
+
+    const balance = await token.balanceOf(buyer.address);
+    const sellAmount = balance / 3n;
+    const preview = await token.previewSell(sellAmount);
+
+    await token.connect(buyer).approve(other.address, sellAmount);
+    const nativeBefore = await ethers.provider.getBalance(buyer.address);
+    const tx = await token.connect(other).transferFrom(buyer.address, await token.getAddress(), sellAmount);
+    const receipt = await tx.wait();
+
+    expect(await token.balanceOf(buyer.address)).to.equal(balance - sellAmount);
+    expect(await ethers.provider.getBalance(buyer.address)).to.equal(nativeBefore + preview[1]);
+    expect(await token.allowance(buyer.address, other.address)).to.equal(0n);
+
+    const sellEvent = receipt!.logs.find((log) => "fragment" in log && log.fragment?.name === "SellExecuted");
+    expect(sellEvent).to.not.equal(undefined);
+    expect(sellEvent!.args.seller).to.equal(buyer.address);
+    expect(sellEvent!.args.netQuoteOut).to.equal(preview[1]);
   });
 
   it("blocks transferFrom into the pair before graduation", async function () {
@@ -178,7 +227,12 @@ describe("LaunchToken", function () {
 
     await token.connect(buyer).buy(0, { value: SMALL_BUY });
     const accounted = await token.accountedNativeBalance();
-    expect(accounted).to.equal((await token.curveQuoteReserve()) + (await token.protocolFeeVault()) + (await token.creatorFeeVault()));
+    expect(accounted).to.equal(
+      (await token.curveQuoteReserve()) +
+        (await token.protocolFeeVault()) +
+        (await token.creatorFeeVault()) +
+        (await token.graduationAssistReserve())
+    );
 
     const ForceSend = await ethers.getContractFactory("ForceSend");
     const forceSend = await ForceSend.deploy({ value: ethers.parseEther("0.25") });
@@ -189,19 +243,49 @@ describe("LaunchToken", function () {
     expect(await token.accountedNativeBalance()).to.equal(accounted);
   });
 
+  it("reconciles forced native into protocol fees without disturbing trade accounting", async function () {
+    const { buyer, other, protocol, token } = await deployFixture();
+
+    await token.connect(buyer).buy(0, { value: SMALL_BUY });
+    const accountedBefore = await token.accountedNativeBalance();
+    const protocolFeeBefore = await token.protocolFeeVault();
+
+    const ForceSend = await ethers.getContractFactory("ForceSend");
+    const forceSend = await ForceSend.deploy({ value: ethers.parseEther("0.25") });
+    await forceSend.waitForDeployment();
+    await forceSend.boom(await token.getAddress());
+
+    await expect(token.connect(buyer).reconcileUnexpectedNative())
+      .to.emit(token, "UnexpectedNativeReconciled")
+      .withArgs(buyer.address, ethers.parseEther("0.25"));
+
+    expect(await token.unexpectedNativeBalance()).to.equal(0n);
+    expect(await token.protocolFeeVault()).to.equal(protocolFeeBefore + ethers.parseEther("0.25"));
+    expect(await token.accountedNativeBalance()).to.equal(accountedBefore + ethers.parseEther("0.25"));
+
+    const recipientBalanceBefore = await ethers.provider.getBalance(other.address);
+    const claimable = await token.protocolFeeVault();
+    await token.connect(protocol).claimProtocolFeesTo(other.address);
+
+    expect(await ethers.provider.getBalance(other.address)).to.equal(recipientBalanceBefore + claimable);
+    expect(await token.protocolFeeVault()).to.equal(0n);
+  });
+
   it("uses a 0.3% protocol / 0.7% creator split on buys", async function () {
     const { token, buyer } = await deployFixture();
 
     await token.connect(buyer).buy(0, { value: MEDIUM_BUY });
 
-    expect(await token.protocolFeeVault()).to.equal(ethers.parseEther("0.0003"));
+    expect((await token.protocolFeeVault()) + (await token.graduationAssistReserve())).to.equal(
+      ethers.parseEther("0.0003")
+    );
     expect(await token.creatorFeeVault()).to.equal(ethers.parseEther("0.0007"));
   });
 
   it("blocks creator fee claim before graduation and allows protocol fee claim during bonding", async function () {
-    const { token, buyer, creator, protocol } = await deployFixture();
+    const { token, buyer, creator, protocol } = await deployFixture({ graduationTarget: ethers.parseEther("12") });
 
-    await token.connect(buyer).buy(0, { value: MEDIUM_BUY });
+    await token.connect(buyer).buy(0, { value: ethers.parseEther("4.2") });
 
     await expect(token.connect(creator).claimCreatorFees()).to.be.revertedWithCustomError(token, "InvalidState");
 
@@ -213,9 +297,9 @@ describe("LaunchToken", function () {
   });
 
   it("sweeps abandoned creator fees into the protocol vault only after 180 days and 30 days inactivity", async function () {
-    const { token, buyer, other } = await deployFixture();
+    const { token, buyer, other } = await deployFixture({ graduationTarget: ethers.parseEther("12") });
 
-    await token.connect(buyer).buy(0, { value: MEDIUM_BUY });
+    await token.connect(buyer).buy(0, { value: ethers.parseEther("4.2") });
     const creatorFeesFromFirstTrade = await token.creatorFeeVault();
     const protocolFeesFromFirstTrade = await token.protocolFeeVault();
 
@@ -309,15 +393,18 @@ describe("LaunchToken", function () {
   });
 
   it("allows claiming fees to an alternate recipient", async function () {
-    const { token, buyer, creator, protocol, other } = await deployFixture();
+    const { token, buyer, creator, protocol, other, seller } = await deployFixture({
+      graduationTarget: ethers.parseEther("12")
+    });
 
-    await token.connect(buyer).buy(0, { value: OVERBUY });
+    await token.connect(buyer).buy(0, { value: ethers.parseEther("4.2") });
 
     const protocolClaimable = await token.protocolFeeVault();
     await expect(token.connect(protocol).claimProtocolFeesTo(other.address))
       .to.emit(token, "ProtocolFeesClaimed")
       .withArgs(other.address, protocolClaimable);
 
+    await token.connect(seller).buy(0, { value: ethers.parseEther("20") });
     const creatorClaimable = await token.creatorFeeVault();
     await expect(token.connect(creator).claimCreatorFeesTo(other.address))
       .to.emit(token, "CreatorFeesClaimed")
@@ -336,6 +423,23 @@ describe("LaunchToken", function () {
     expect(await token.state()).to.equal(3n);
   });
 
+  it("auto-graduates with the graduation assist reserve once the remaining quote is within 0.005 BNB", async function () {
+    const largeTarget = ethers.parseEther("12");
+    const { buyer, protocol, token } = await deployFixture({ graduationTarget: largeTarget });
+
+    const grossBuy = ethers.parseEther("12.1162");
+    await expect(token.connect(buyer).buy(0, { value: grossBuy })).to.emit(token, "Graduated");
+
+    expect(await token.state()).to.equal(3n);
+    expect(await token.curveQuoteReserve()).to.equal(0n);
+    expect(await token.graduationAssistReady()).to.equal(false);
+    expect(await token.graduationAssistReserve()).to.equal(0n);
+    expect(await token.protocolClaimable()).to.be.gt(0n);
+
+    await expect(token.connect(protocol).claimProtocolFees()).to.not.be.reverted;
+    expect(await token.graduationAssistReserve()).to.equal(0n);
+  });
+
   it("allows graduation when pair has preloaded WNATIVE donation", async function () {
     const { token, buyer, wbnb, pair } = await deployFixture();
 
@@ -343,29 +447,35 @@ describe("LaunchToken", function () {
     await wbnb.mint(await pair.getAddress(), donation);
     await pair.setReserves(0, donation);
 
-    expect(await token.isPairClean()).to.equal(false);
-    expect(await token.isPairGraduationCompatible()).to.equal(true);
-
     await expect(token.connect(buyer).buy(0, { value: OVERBUY })).to.not.be.reverted;
     expect(await token.state()).to.equal(3n);
+    const dexReserves = await token.dexReserves();
+    expect(dexReserves[0]).to.equal(ethers.parseEther("200000000"));
+    expect(dexReserves[1]).to.equal(GRADUATION_TARGET);
   });
 
-  it("reports preloaded WNATIVE donation in the graduation event", async function () {
-    const { token, buyer, wbnb, pair } = await deployFixture();
+  it("offsets synced preloaded WNATIVE against the protocol contribution and preserves the 12 BNB graduation reserve", async function () {
+    const { token, buyer, protocol, wbnb, pair } = await deployFixture();
 
     const donation = ethers.parseEther("0.1");
     await wbnb.mint(await pair.getAddress(), donation);
     await pair.setReserves(0, donation);
+
+    const protocolClaimableBefore = await token.protocolFeeVault();
 
     await expect(token.connect(buyer).buy(0, { value: OVERBUY }))
       .to.emit(token, "Graduated")
       .withArgs(
         await pair.getAddress(),
         ethers.parseEther("200000000"),
-        GRADUATION_TARGET,
+        GRADUATION_TARGET - donation,
         donation,
         anyValue
       );
+
+    expect(await token.protocolFeeVault()).to.be.gte(protocolClaimableBefore + donation);
+    await token.connect(protocol).claimProtocolFees();
+    expect(await token.protocolFeeVault()).to.equal(0n);
   });
 
   it("reverts graduation when pair already has LP initialized", async function () {
@@ -373,26 +483,78 @@ describe("LaunchToken", function () {
 
     await pair.setTotalSupply(1n);
 
-    expect(await token.isPairGraduationCompatible()).to.equal(false);
-
     await expect(token.connect(buyer).buy(0, { value: OVERBUY })).to.be.revertedWithCustomError(token, "PairPolluted");
   });
 
-  it("still allows graduation when preloaded quote exceeds the graduation target", async function () {
-    const { token, buyer, wbnb, pair } = await deployFixture();
+  it("treats unsynced preloaded quote as pair liquidity so exact-target buys still graduate cleanly", async function () {
+    const { protocol, token, buyer, wbnb, pair } = await deployFixture();
 
-    await wbnb.mint(await pair.getAddress(), GRADUATION_TARGET + 1n);
-    expect(await token.isPairGraduationCompatible()).to.equal(true);
+    const donation = ethers.parseEther("0.1");
+    await wbnb.mint(await pair.getAddress(), donation);
+
+    const protocolBefore = await wbnb.balanceOf(protocol.address);
 
     await expect(token.connect(buyer).buy(0, { value: OVERBUY }))
       .to.emit(token, "Graduated")
       .withArgs(
         await pair.getAddress(),
         ethers.parseEther("200000000"),
-        GRADUATION_TARGET,
-        GRADUATION_TARGET + 1n,
+        GRADUATION_TARGET - donation,
+        donation,
         anyValue
       );
+
+    expect(await wbnb.balanceOf(protocol.address)).to.equal(protocolBefore);
+  });
+
+  it("reverts graduation when synced preloaded quote already exceeds the configured target", async function () {
+    const { token, buyer, wbnb, pair } = await deployFixture();
+
+    const donation = GRADUATION_TARGET + 1n;
+    await wbnb.mint(await pair.getAddress(), donation);
+    await pair.setReserves(0, donation);
+
+    await expect(token.connect(buyer).buy(0, { value: OVERBUY })).to.be.revertedWithCustomError(token, "PairPolluted");
+  });
+
+  it("does not freeze the last 0.005 graduation window when the pair is already polluted", async function () {
+    const largeTarget = ethers.parseEther("12");
+    const { token, buyer, seller, wbnb, pair } = await deployFixture({ graduationTarget: largeTarget });
+
+    const donation = largeTarget + 1n;
+    await wbnb.mint(await pair.getAddress(), donation);
+    await pair.setReserves(0, donation);
+
+    const nearBoundaryBuy = ethers.parseEther("12.1162");
+    await expect(token.connect(buyer).buy(0, { value: nearBoundaryBuy })).to.not.be.reverted;
+
+    expect(await token.state()).to.equal(1n);
+    expect(await token.graduationAssistReady()).to.equal(false);
+
+    const sellAmount = (await token.balanceOf(buyer.address)) / 10n;
+    await expect(token.connect(buyer).transfer(await token.getAddress(), sellAmount)).to.not.be.reverted;
+    await expect(token.connect(seller).buy(0, { value: ethers.parseEther("0.01") })).to.not.be.reverted;
+  });
+
+  it("lets anyone recover unsynced pair quote above the graduation target before graduating", async function () {
+    const { token, buyer, protocol, wbnb, pair } = await deployFixture();
+
+    const donation = GRADUATION_TARGET + ethers.parseEther("0.01");
+    await wbnb.mint(await pair.getAddress(), donation);
+
+    const protocolWrappedBefore = await wbnb.balanceOf(protocol.address);
+
+    await expect(token.connect(buyer).recoverUnsyncedPairQuote())
+      .to.emit(token, "GraduationPairUnsyncedQuoteRecovered")
+      .withArgs(protocol.address, donation);
+
+    expect(await wbnb.balanceOf(await pair.getAddress())).to.equal(0n);
+    await expect(token.connect(buyer).buy(0, { value: OVERBUY })).to.emit(token, "Graduated");
+    expect(await token.state()).to.equal(3n);
+    expect(await wbnb.balanceOf(protocol.address)).to.equal(protocolWrappedBefore + donation);
+    const dexReserves = await token.dexReserves();
+    expect(dexReserves[1]).to.equal(GRADUATION_TARGET);
+    expect(await wbnb.balanceOf(await pair.getAddress())).to.equal(GRADUATION_TARGET);
   });
 
   it("blocks sending tokens back into the token contract after graduation", async function () {

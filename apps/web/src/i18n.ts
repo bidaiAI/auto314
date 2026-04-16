@@ -110,7 +110,7 @@ const strings = {
     protocolFaqOneTitle: "Do I need a separate swap before launch?",
     protocolFaqOneDesc: "No. In 0314-style launches, the contract itself handles the first market. A canonical V2 pair only matters after graduation.",
     protocolFaqTwoTitle: "Why does 314 feel different from a normal launchpad?",
-    protocolFaqTwoDesc: "Because the first trading surface lives in the launch contract itself, not in a platform-owned pool or off-chain backend. That is why transfer-to-contract buying became the signature interaction.",
+    protocolFaqTwoDesc: "Because the first trading surface lives in the launch contract itself, not in a platform-owned pool or off-chain backend. The launch feels different because early trading and graduation are handled by the contract lifecycle itself.",
     protocolFaqThreeTitle: "Why is the backend lighter than a normal platform?",
     protocolFaqThreeDesc: "Because the server mostly indexes and presents data. It does not run the market, custody funds, or execute swaps for users.",
     feeSplit: "Fee split",
