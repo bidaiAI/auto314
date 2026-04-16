@@ -1,6 +1,6 @@
 # Autonomous 314 — Base Runtime Profile
 
-Last updated: **2026-04-12**
+Last updated: **2026-04-15**
 
 This page documents the **Base chain deployment profile** for Autonomous 314.
 
@@ -28,24 +28,31 @@ Use it when you deploy or integrate the Base instance of the protocol.
 
 ## Official Base deployment
 
-- **Factory:** `0x6fDE83bB814AC79D1267695d532e2Dd9d16A0314`
-- **Factory deployment tx:** `0x66f47b312f40ccff7c22f52bffc0b4610c0c091e42d5ea3409a3e4926b2f6814`
-- **Factory deployment block:** `44505311`
+- **Factory:** `0x95302fb1Aa9cD62F070E512B3d415d8388742a22`
+- **Factory deployment tx:** `0x7f83969f3b8aecec11fc9b2adb98f55703b677e76678b8635973b4abdc7854ce`
+- **Factory deployment block:** `44747121`
 - **Deployment salt:** `0x910c5bb21b8b4100fd60a57155745d3aefb496aa859fc088f8136be56ca8ef31`
 
 ### Official Base support deployers
 
 | Contract | Address | Deployment tx | Block |
 |---|---|---|---|
-| LaunchTokenDeployer | `0xc6611f07a35222095A78Be7fa6e5f5E3B9585e83` | `0x971a8396501b0687b3cc3090c8e413fcc9df5fd0a57ff8d0355d27b2022863d4` | `44504892` |
-| LaunchTokenWhitelistDeployer | `0x502C1605B17E2c0B67Dd4C855E095989945aB3cc` | `0x34972b27827172cef5e3058da9f69a7f596f281412f6e18d4a87f95760e3c20f` | `44505296` |
-| LaunchTokenTaxedDeployer | `0xA45921Dc733188c8C68D017984224E0EC125b095` | `0xb6086624c3eaf66d3011caa02f30c3319c093fd2b932251e84aec202bb27f3e2` | `44505302` |
-| LaunchCreate2Deployer | `0xf0Ef9342fB2866580F4d428E6FF00E5394E15182` | `0xaf3eb01d437c08bea997c039492e1bb51e2c546988e2e02c7f16986526075920` | `44505306` |
+| LaunchTokenDeployer | `0xEf6e2A4012012782520636f92411360Eef04e85F` | `0x42276e0768de38e285818c17755dda60dc6f89acd5e3aadf3ea5962633b7b7b7` | `44747109` |
+| Whitelist LaunchCreate2Deployer | `0x7DC13A23cE2Ec1C0958a0edc9B2f48fB9B953Bf8` | `0x387c963aaf5b1a1b5f6c9e38e709dc1a13c393d8f6a3719431c160627fe4f4ad` | `44747112` |
+| LaunchTokenTaxedDeployer | `0xD7d6cc1dD8ad78759b45243722dBb2be548a02b4` | `0x95d137375a88d8679226dfd00182006859bcdeac87ca3a2f5aae94e273450a4c` | `44747114` |
+| WhitelistTaxed LaunchCreate2Deployer | `0x493F48a18C1c63D2B33bA0883FA85FF044bB70B6` | `0x2ae6c0300a23052b6e52a1f654106ba58fa02a86b5d4bea33576b91dce11d44b` | `44747117` |
 
 ### Create2 bind
 
-- **Whitelist-taxed deployer bind tx:** `0xe51199a3da00cbd95c019c88f201ad390644f12393d4705bb3b2d4a3cdcc4341`
-- **Whitelist-taxed deployer bind block:** `44505314`
+- **Whitelist deployer bind tx:** `0xf147c80ae12331194aff5d082aa4079e21632986f9076c59ff0612bf02a8815d`
+- **Whitelist deployer bind block:** `44747123`
+- **Whitelist-taxed deployer bind tx:** `0x21aeed60812888771ba1379ed23d21458b86cde358b71174e563e005492ffb25`
+- **Whitelist-taxed deployer bind block:** `44747125`
+
+## vNext behavior
+
+- **Graduation assist reserve:** up to `0.005 native` of protocol fees can be escrowed to finish the last edge into graduation when objective on-chain conditions are met. Once the assist window is active, ordinary buy/sell/transfer activity is frozen and `pokeGraduation()` completes the graduation.
+- **Pre-grad transfer policy:** normal wallet-to-wallet transfers remain blocked until `DEXOnly`, but transfers directly to the token contract are allowed and auto-sell.
 
 ## Self-host notes
 

@@ -43,12 +43,13 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000 ether;
     uint256 public constant LP_TOKEN_RESERVE = 200_000_000 ether;
     uint256 public constant SALE_TOKEN_RESERVE = TOTAL_SUPPLY - LP_TOKEN_RESERVE;
-    uint256 public constant VIRTUAL_QUOTE_DIVISOR = 3;
+    uint256 public constant CURVE_VIRTUAL_TOKEN_RESERVE = 107_036_752 ether;
 
     uint256 public constant BPS_DENOMINATOR = 10_000;
     uint256 public constant TOTAL_FEE_BPS = 100;
     uint256 public constant PROTOCOL_FEE_BPS = 30;
     uint256 public constant CREATOR_FEE_BPS = 70;
+    uint256 public constant GRADUATION_ASSIST_THRESHOLD = 0.005 ether;
     uint256 public constant CREATOR_FEE_SWEEP_MIN_AGE = 180 days;
     uint256 public constant CREATOR_FEE_SWEEP_MIN_INACTIVITY = 30 days;
 
@@ -75,10 +76,12 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
     uint256 public curveQuoteReserve;
     uint256 public protocolFeeVault;
     uint256 public creatorFeeVault;
+    uint256 public graduationAssistReserve;
     uint256 public lastTradeAt;
     uint256 public whitelistAllocationTokenReserve;
 
     mapping(address => uint256) public lastBuyBlock;
+    mapping(address => bool) public hasTransferredOut;
 
     event StateTransition(LaunchState indexed previousState, LaunchState indexed newState);
     event BuyExecuted(
@@ -109,9 +112,14 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
         uint256 preloadedQuoteAmount,
         uint256 liquidityBurned
     );
+    event UnexpectedNativeReconciled(address indexed caller, uint256 amount);
     event ProtocolFeesClaimed(address indexed recipient, uint256 amount);
     event CreatorFeesClaimed(address indexed recipient, uint256 amount);
     event CreatorFeesSwept(address indexed caller, uint256 amount);
+    event GraduationAssistFunded(uint256 amount, uint256 reserveAfter);
+    event GraduationAssistTriggered(uint256 amountUsed, uint256 reserveAfter);
+    event GraduationAssistReclaimed(uint256 amount, uint256 protocolFeeVaultAfter);
+    event GraduationPairUnsyncedQuoteRecovered(address indexed recipient, uint256 amountRecovered);
 
     error InvalidState();
     error ZeroAmount();
@@ -128,6 +136,8 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
     error InvalidGraduationConfig();
     error CreatorFeeSweepUnavailable();
     error UnauthorizedFactoryCaller();
+    error GraduationAssistUnavailable();
+    error GraduationWindowFrozen();
 
     constructor(
         string memory name_,
@@ -142,7 +152,11 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
         LaunchState initialState_
     ) ERC20(name_, symbol_) {
         if (graduationQuoteReserve_ == 0) revert InvalidGraduationConfig();
-        uint256 virtualQuoteReserve_ = graduationQuoteReserve_ / VIRTUAL_QUOTE_DIVISOR;
+        uint256 virtualQuoteReserve_ = Math.mulDiv(
+            graduationQuoteReserve_,
+            LP_TOKEN_RESERVE + CURVE_VIRTUAL_TOKEN_RESERVE,
+            SALE_TOKEN_RESERVE
+        );
         if (virtualQuoteReserve_ == 0) revert InvalidGraduationConfig();
         if (creator_ == address(0) || factory_ == address(0) || protocolFeeRecipient_ == address(0) || router_ == address(0)) revert ZeroAddress();
 
@@ -154,7 +168,7 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
         wrappedNative = IUniswapV2LikeRouter02(router_).WETH();
         graduationQuoteReserve = graduationQuoteReserve_;
         virtualQuoteReserve = virtualQuoteReserve_;
-        virtualTokenReserve = (LP_TOKEN_RESERVE * virtualQuoteReserve_) / graduationQuoteReserve_;
+        virtualTokenReserve = CURVE_VIRTUAL_TOKEN_RESERVE;
         createdAt = block.timestamp;
         lastTradeAt = block.timestamp;
         metadataURI = metadataURI_;
@@ -178,6 +192,7 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
     function buy(uint256 minTokenOut) external payable virtual nonReentrant returns (uint256 tokenOut) {
         _beforeBondingAction();
         if (state != LaunchState.Bonding314) revert InvalidState();
+        if (graduationAssistReady()) revert GraduationWindowFrozen();
         tokenOut = _buyFrom(msg.sender, payable(msg.sender), minTokenOut);
     }
 
@@ -191,6 +206,7 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
         if (msg.sender != factory) revert UnauthorizedFactoryCaller();
         _beforeBondingAction();
         if (state != LaunchState.Bonding314) revert InvalidState();
+        if (graduationAssistReady()) revert GraduationWindowFrozen();
         tokenOut = _buyFrom(recipient, payable(recipient), minTokenOut);
     }
 
@@ -201,43 +217,8 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
         returns (uint256 netQuoteOut)
     {
         _beforeBondingAction();
-        if (state != LaunchState.Bonding314) revert InvalidState();
-        if (tokenAmount == 0) revert ZeroAmount();
-        if (lastBuyBlock[msg.sender] == block.number) revert SellCooldownActive();
-
-        (uint256 effectiveQuoteReserve, uint256 effectiveTokenReserve) = _effectiveReserves();
-        uint256 invariant = effectiveQuoteReserve * effectiveTokenReserve;
-        uint256 newEffectiveTokenReserve = effectiveTokenReserve + tokenAmount;
-        uint256 newEffectiveQuoteReserve = Math.ceilDiv(invariant, newEffectiveTokenReserve);
-        uint256 grossQuoteOut = effectiveQuoteReserve - newEffectiveQuoteReserve;
-
-        if (grossQuoteOut == 0 || grossQuoteOut > curveQuoteReserve) revert SlippageExceeded();
-
-        (uint256 totalFee, uint256 protocolFee, uint256 creatorFee) = _splitFees(grossQuoteOut);
-        netQuoteOut = grossQuoteOut - totalFee;
-        if (netQuoteOut == 0) revert SlippageExceeded();
-        if (netQuoteOut < minQuoteOut) revert SlippageExceeded();
-
-        _transfer(msg.sender, address(this), tokenAmount);
-
-        saleTokenReserve += tokenAmount;
-        curveQuoteReserve -= grossQuoteOut;
-        protocolFeeVault += protocolFee;
-        creatorFeeVault += creatorFee;
-        lastTradeAt = block.timestamp;
-
-        payable(msg.sender).sendValue(netQuoteOut);
-
-        emit SellExecuted(
-            msg.sender,
-            tokenAmount,
-            grossQuoteOut,
-            netQuoteOut,
-            protocolFee,
-            creatorFee,
-            curveQuoteReserve,
-            saleTokenReserve
-        );
+        if (graduationAssistReady()) revert GraduationWindowFrozen();
+        netQuoteOut = _sellFrom(msg.sender, payable(msg.sender), tokenAmount, minQuoteOut);
     }
 
     function claimProtocolFees() external nonReentrant returns (uint256 amount) {
@@ -299,6 +280,15 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
         emit CreatorFeesSwept(msg.sender, amount);
     }
 
+    function reconcileUnexpectedNative() external returns (uint256 amount) {
+        amount = _unexpectedNativeBalance();
+        if (amount == 0) revert NothingToClaim();
+
+        protocolFeeVault += amount;
+
+        emit UnexpectedNativeReconciled(msg.sender, amount);
+    }
+
     function previewBuy(uint256 grossQuoteIn)
         external
         view
@@ -306,6 +296,9 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
     {
         if (state != LaunchState.Bonding314) {
             return (0, 0, 0);
+        }
+        if (graduationAssistReady()) {
+            return (0, 0, grossQuoteIn);
         }
         if (grossQuoteIn == 0) {
             return (0, 0, 0);
@@ -323,6 +316,9 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
         returns (uint256 grossQuoteOut, uint256 netQuoteOut, uint256 totalFee)
     {
         if (state != LaunchState.Bonding314) {
+            return (0, 0, 0);
+        }
+        if (graduationAssistReady()) {
             return (0, 0, 0);
         }
         if (tokenAmount == 0) {
@@ -392,23 +388,9 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
     }
 
     function canSell(address account) external view returns (bool) {
+        if (graduationAssistReady()) return false;
         uint256 lastBuy = lastBuyBlock[account];
         return lastBuy == 0 || block.number > lastBuy;
-    }
-
-    function isPairClean() external view returns (bool) {
-        return _pairIsClean();
-    }
-
-    function isPairGraduationCompatible() external view returns (bool) {
-        return _pairAllowsGraduation();
-    }
-
-    function pairPreloadedQuote() external view returns (uint256) {
-        if (pair == address(0)) {
-            return 0;
-        }
-        return IERC20Minimal(wrappedNative).balanceOf(pair);
     }
 
     function protocolClaimable() external view returns (uint256) {
@@ -428,6 +410,73 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
 
     function creatorFeeSweepReady() external view returns (bool) {
         return _creatorFeeSweepReady();
+    }
+
+    function recoverUnsyncedPairQuote() external returns (uint256 recoveredAmount) {
+        if (state != LaunchState.Bonding314) revert InvalidState();
+        if (pair == address(0)) revert PairPolluted();
+
+        IUniswapV2LikePair lpPair = IUniswapV2LikePair(pair);
+        if (lpPair.totalSupply() != 0) revert PairPolluted();
+
+        (uint112 reserve0, uint112 reserve1,) = lpPair.getReserves();
+        address token0 = lpPair.token0();
+        address token1 = lpPair.token1();
+
+        uint256 tokenReserve;
+        uint256 wrappedReserve;
+        if (token0 == address(this)) {
+            tokenReserve = reserve0;
+            wrappedReserve = reserve1;
+        } else if (token1 == address(this)) {
+            tokenReserve = reserve1;
+            wrappedReserve = reserve0;
+        } else {
+            revert PairPolluted();
+        }
+
+        if (tokenReserve != 0) revert PairPolluted();
+        if (balanceOf(pair) != 0) revert PairPolluted();
+        if (wrappedReserve > graduationQuoteReserve) revert PairPolluted();
+
+        uint256 wrappedBalanceAtPair = IERC20Minimal(wrappedNative).balanceOf(pair);
+        if (wrappedBalanceAtPair <= wrappedReserve) revert NothingToClaim();
+
+        recoveredAmount = wrappedBalanceAtPair - wrappedReserve;
+        lpPair.skim(protocolFeeRecipient);
+
+        if (balanceOf(pair) != 0) revert PairPolluted();
+        if (IERC20Minimal(wrappedNative).balanceOf(pair) != wrappedReserve) revert PairPolluted();
+
+        emit GraduationPairUnsyncedQuoteRecovered(protocolFeeRecipient, recoveredAmount);
+    }
+
+    function graduationAssistReady() public view returns (bool) {
+        if (state != LaunchState.Bonding314) {
+            return false;
+        }
+        uint256 remaining = _remainingQuoteCapacity();
+        return
+            remaining != 0
+                && remaining <= GRADUATION_ASSIST_THRESHOLD
+                && graduationAssistReserve >= remaining
+                && _graduationPathHealthy();
+    }
+
+    function graduationAssistStatus()
+        external
+        view
+        returns (uint256 threshold, uint256 reserve, uint256 remaining, bool ready)
+    {
+        threshold = GRADUATION_ASSIST_THRESHOLD;
+        reserve = graduationAssistReserve;
+        remaining = state == LaunchState.Bonding314 ? _remainingQuoteCapacity() : 0;
+        ready = graduationAssistReady();
+    }
+
+    function pokeGraduation() external nonReentrant returns (bool graduated) {
+        graduated = _tryUseGraduationAssist();
+        if (!graduated) revert GraduationAssistUnavailable();
     }
 
     function pairSnapshot()
@@ -455,15 +504,11 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
     }
 
     function accountedNativeBalance() external view returns (uint256) {
-        return curveQuoteReserve + protocolFeeVault + creatorFeeVault + _additionalAccountedNative();
+        return _accountedNativeBalance();
     }
 
     function unexpectedNativeBalance() external view returns (uint256) {
-        uint256 accounted = curveQuoteReserve + protocolFeeVault + creatorFeeVault + _additionalAccountedNative();
-        if (address(this).balance <= accounted) {
-            return 0;
-        }
-        return address(this).balance - accounted;
+        return _unexpectedNativeBalance();
     }
 
     function whitelistStatus() public view virtual returns (uint8) {
@@ -514,12 +559,31 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
         return (false, 0, 0, 0, address(0), false);
     }
 
-    function transfer(address to, uint256 value) public virtual override returns (bool) {
+    function transfer(address to, uint256 value) public virtual override nonReentrant returns (bool) {
+        if (value == 0) {
+            return super.transfer(to, value);
+        }
+        if (state == LaunchState.Bonding314 && to == address(this)) {
+            _beforeBondingAction();
+            _sellFrom(_msgSender(), payable(_msgSender()), value, 0);
+            return true;
+        }
         if (state != LaunchState.DEXOnly) revert TransferDisabledPreGraduation();
         return super.transfer(to, value);
     }
 
-    function transferFrom(address from, address to, uint256 value) public virtual override returns (bool) {
+    function transferFrom(address from, address to, uint256 value) public virtual override nonReentrant returns (bool) {
+        if (value == 0) {
+            return super.transferFrom(from, to, value);
+        }
+        if (state == LaunchState.Bonding314 && to == address(this)) {
+            _beforeBondingAction();
+            if (_msgSender() != from) {
+                _spendAllowance(from, _msgSender(), value);
+            }
+            _sellFrom(from, payable(from), value, 0);
+            return true;
+        }
         if (state != LaunchState.DEXOnly) {
             bool migrationPull = state == LaunchState.Migrating && from == address(this);
             if (!migrationPull) revert TransferDisabledPreGraduation();
@@ -537,6 +601,7 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
         if (buyer == address(0) || buyer == address(this) || buyer == pair) {
             revert InvalidRecipient();
         }
+        if (graduationAssistReady()) revert GraduationWindowFrozen();
         if (msg.value == 0) revert ZeroAmount();
 
         (uint256 usedGross, uint256 netQuoteIn, uint256 protocolFee, uint256 creatorFee) = _quoteBuy(msg.value);
@@ -552,7 +617,7 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
         if (tokenOut < minTokenOut) revert SlippageExceeded();
 
         curveQuoteReserve += netQuoteIn;
-        protocolFeeVault += protocolFee;
+        protocolFeeVault += _allocateProtocolFee(protocolFee);
         creatorFeeVault += creatorFee;
         lastTradeAt = block.timestamp;
         saleTokenReserve -= tokenOut;
@@ -579,7 +644,53 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
 
         if (curveQuoteReserve >= graduationQuoteReserve || saleTokenReserve == 0) {
             _graduate();
+        } else {
+            _tryUseGraduationAssist();
         }
+    }
+
+    function _sellFrom(address seller, address payable payoutRecipient, uint256 tokenAmount, uint256 minQuoteOut)
+        internal
+        returns (uint256 netQuoteOut)
+    {
+        if (state != LaunchState.Bonding314) revert InvalidState();
+        if (graduationAssistReady()) revert GraduationWindowFrozen();
+        if (tokenAmount == 0) revert ZeroAmount();
+        if (lastBuyBlock[seller] == block.number) revert SellCooldownActive();
+
+        (uint256 effectiveQuoteReserve, uint256 effectiveTokenReserve) = _effectiveReserves();
+        uint256 invariant = effectiveQuoteReserve * effectiveTokenReserve;
+        uint256 newEffectiveTokenReserve = effectiveTokenReserve + tokenAmount;
+        uint256 newEffectiveQuoteReserve = Math.ceilDiv(invariant, newEffectiveTokenReserve);
+        uint256 grossQuoteOut = effectiveQuoteReserve - newEffectiveQuoteReserve;
+
+        if (grossQuoteOut == 0 || grossQuoteOut > curveQuoteReserve) revert SlippageExceeded();
+
+        (uint256 totalFee, uint256 protocolFee, uint256 creatorFee) = _splitFees(grossQuoteOut);
+        netQuoteOut = grossQuoteOut - totalFee;
+        if (netQuoteOut == 0) revert SlippageExceeded();
+        if (netQuoteOut < minQuoteOut) revert SlippageExceeded();
+
+        _transfer(seller, address(this), tokenAmount);
+
+        saleTokenReserve += tokenAmount;
+        curveQuoteReserve -= grossQuoteOut;
+        protocolFeeVault += _allocateProtocolFee(protocolFee);
+        creatorFeeVault += creatorFee;
+        lastTradeAt = block.timestamp;
+
+        payoutRecipient.sendValue(netQuoteOut);
+
+        emit SellExecuted(
+            seller,
+            tokenAmount,
+            grossQuoteOut,
+            netQuoteOut,
+            protocolFee,
+            creatorFee,
+            curveQuoteReserve,
+            saleTokenReserve
+        );
     }
 
     function _quoteBuy(uint256 grossQuoteIn)
@@ -628,20 +739,28 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
         state = LaunchState.Migrating;
         emit StateTransition(previousState, LaunchState.Migrating);
 
-        _assertPairAllowsGraduation();
+        uint256 preloadedQuoteAmount = _preparePairForGraduation();
 
         uint256 tokenAmount = lpTokenReserve;
-        uint256 quoteAmount = curveQuoteReserve;
-        uint256 preloadedQuoteAmount = IERC20Minimal(wrappedNative).balanceOf(pair);
+        uint256 quoteAmount = curveQuoteReserve - preloadedQuoteAmount;
 
         _transfer(address(this), pair, tokenAmount);
-        IWrappedNative(wrappedNative).deposit{value: quoteAmount}();
-        bool wrappedTransferOk = IWrappedNative(wrappedNative).transfer(pair, quoteAmount);
-        if (!wrappedTransferOk) revert WrappedQuoteTransferFailed();
+        if (quoteAmount != 0) {
+            IWrappedNative(wrappedNative).deposit{value: quoteAmount}();
+            bool wrappedTransferOk = IWrappedNative(wrappedNative).transfer(pair, quoteAmount);
+            if (!wrappedTransferOk) revert WrappedQuoteTransferFailed();
+        }
 
         uint256 liquidityBurned = IUniswapV2LikePair(pair).mint(DEAD_ADDRESS);
 
         lpTokenReserve = 0;
+        uint256 reclaimedAssist = graduationAssistReserve;
+        if (reclaimedAssist != 0) {
+            graduationAssistReserve = 0;
+            protocolFeeVault += reclaimedAssist;
+            emit GraduationAssistReclaimed(reclaimedAssist, protocolFeeVault);
+        }
+        protocolFeeVault += preloadedQuoteAmount;
         curveQuoteReserve = 0;
 
         previousState = state;
@@ -650,40 +769,124 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
         emit Graduated(pair, tokenAmount, quoteAmount, preloadedQuoteAmount, liquidityBurned);
     }
 
-    function _assertPairAllowsGraduation() internal view {
-        if (!_pairAllowsGraduation()) revert PairPolluted();
+    function _accountedNativeBalance() internal view returns (uint256) {
+        return curveQuoteReserve + protocolFeeVault + creatorFeeVault + graduationAssistReserve + _additionalAccountedNative();
     }
 
-    function _pairIsClean() internal view returns (bool) {
-        if (pair == address(0)) return false;
+    function _remainingQuoteCapacity() internal view returns (uint256) {
+        if (curveQuoteReserve >= graduationQuoteReserve) {
+            return 0;
+        }
+        return graduationQuoteReserve - curveQuoteReserve;
+    }
 
-        IUniswapV2LikePair lpPair = IUniswapV2LikePair(pair);
-        if (lpPair.totalSupply() != 0) return false;
+    function _allocateProtocolFee(uint256 protocolFee) internal returns (uint256 vaultAmount) {
+        vaultAmount = protocolFee;
+        if (protocolFee == 0) {
+            return 0;
+        }
 
-        (uint112 reserve0, uint112 reserve1,) = lpPair.getReserves();
-        if (reserve0 != 0 || reserve1 != 0) return false;
+        if (graduationAssistReserve >= GRADUATION_ASSIST_THRESHOLD) {
+            return vaultAmount;
+        }
 
-        if (balanceOf(pair) != 0) return false;
-        if (IERC20Minimal(wrappedNative).balanceOf(pair) != 0) return false;
+        uint256 reserveNeeded = GRADUATION_ASSIST_THRESHOLD - graduationAssistReserve;
+        uint256 reserveAmount = protocolFee < reserveNeeded ? protocolFee : reserveNeeded;
+        if (reserveAmount == 0) {
+            return vaultAmount;
+        }
 
+        graduationAssistReserve += reserveAmount;
+        vaultAmount -= reserveAmount;
+
+        emit GraduationAssistFunded(reserveAmount, graduationAssistReserve);
+    }
+
+    function _tryUseGraduationAssist() internal returns (bool graduated) {
+        if (!graduationAssistReady()) {
+            return false;
+        }
+
+        uint256 remaining = _remainingQuoteCapacity();
+        graduationAssistReserve -= remaining;
+        curveQuoteReserve += remaining;
+
+        emit GraduationAssistTriggered(remaining, graduationAssistReserve);
+        _graduate();
         return true;
     }
 
-    function _pairAllowsGraduation() internal view returns (bool) {
-        if (pair == address(0)) return false;
+    function _unexpectedNativeBalance() internal view returns (uint256 amount) {
+        uint256 accounted = _accountedNativeBalance();
+        uint256 actualBalance = address(this).balance;
+        if (actualBalance <= accounted) {
+            return 0;
+        }
+        return actualBalance - accounted;
+    }
+
+    function _preparePairForGraduation() internal returns (uint256 preloadedQuoteAmount) {
+        if (pair == address(0)) revert PairPolluted();
 
         IUniswapV2LikePair lpPair = IUniswapV2LikePair(pair);
-        if (lpPair.totalSupply() != 0) return false;
-
-        if (balanceOf(pair) != 0) return false;
+        if (lpPair.totalSupply() != 0) revert PairPolluted();
 
         (uint112 reserve0, uint112 reserve1,) = lpPair.getReserves();
         address token0 = lpPair.token0();
         address token1 = lpPair.token1();
 
-        if (token0 == address(this) && reserve0 != 0) return false;
-        if (token1 == address(this) && reserve1 != 0) return false;
+        uint256 tokenReserve;
+        uint256 wrappedReserve;
+        if (token0 == address(this)) {
+            tokenReserve = reserve0;
+            wrappedReserve = reserve1;
+        } else if (token1 == address(this)) {
+            tokenReserve = reserve1;
+            wrappedReserve = reserve0;
+        } else {
+            revert PairPolluted();
+        }
 
+        if (tokenReserve != 0) revert PairPolluted();
+
+        uint256 tokenBalanceAtPair = balanceOf(pair);
+        if (tokenBalanceAtPair != 0) revert PairPolluted();
+
+        uint256 wrappedBalanceAtPair = IERC20Minimal(wrappedNative).balanceOf(pair);
+        if (wrappedBalanceAtPair < wrappedReserve) revert PairPolluted();
+
+        preloadedQuoteAmount = wrappedBalanceAtPair;
+        if (preloadedQuoteAmount > graduationQuoteReserve) revert PairPolluted();
+    }
+
+    function _graduationPathHealthy() internal view returns (bool) {
+        if (pair == address(0)) return false;
+
+        IUniswapV2LikePair lpPair = IUniswapV2LikePair(pair);
+        if (lpPair.totalSupply() != 0) return false;
+
+        (uint112 reserve0, uint112 reserve1,) = lpPair.getReserves();
+        address token0 = lpPair.token0();
+        address token1 = lpPair.token1();
+
+        uint256 tokenReserve;
+        uint256 wrappedReserve;
+        if (token0 == address(this)) {
+            tokenReserve = reserve0;
+            wrappedReserve = reserve1;
+        } else if (token1 == address(this)) {
+            tokenReserve = reserve1;
+            wrappedReserve = reserve0;
+        } else {
+            return false;
+        }
+
+        if (tokenReserve != 0) return false;
+        if (balanceOf(pair) != 0) return false;
+
+        uint256 wrappedBalanceAtPair = IERC20Minimal(wrappedNative).balanceOf(pair);
+        if (wrappedBalanceAtPair < wrappedReserve) return false;
+        if (wrappedBalanceAtPair > graduationQuoteReserve) return false;
         return true;
     }
 
@@ -751,6 +954,11 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
     }
 
     function _update(address from, address to, uint256 value) internal virtual override {
+        if (value == 0) {
+            super._update(from, to, value);
+            return;
+        }
+
         if (state == LaunchState.Bonding314 || state == LaunchState.WhitelistCommit) {
             bool isMintOrBurn = from == address(0) || to == address(0);
             bool isProtocolTransfer = from == address(this) || to == address(this);
@@ -766,6 +974,10 @@ abstract contract LaunchTokenBase is ERC20, ReentrancyGuard {
             if (to == address(this)) {
                 revert InvalidRecipient();
             }
+        }
+
+        if (from != address(0) && from != address(this) && value != 0) {
+            hasTransferredOut[from] = true;
         }
 
         super._update(from, to, value);

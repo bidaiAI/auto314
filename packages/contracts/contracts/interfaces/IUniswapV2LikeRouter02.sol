@@ -5,6 +5,13 @@ interface IUniswapV2LikeRouter02 {
     function factory() external pure returns (address);
     function WETH() external pure returns (address);
 
+    function swapExactETHForTokensSupportingFeeOnTransferTokens(
+        uint256 amountOutMin,
+        address[] calldata path,
+        address to,
+        uint256 deadline
+    ) external payable;
+
     function addLiquidityETH(
         address token,
         uint256 amountTokenDesired,

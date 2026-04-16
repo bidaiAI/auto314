@@ -1,6 +1,6 @@
 # Autonomous 314 — Official Parameters
 
-Last updated: **2026-04-12**
+Last updated: **2026-04-15**
 
 This page is the **canonical public reference** for the current official Autonomous 314 deployment and runtime profile.
 
@@ -22,6 +22,8 @@ These are **official chain/runtime values**, not the default placeholders used b
 - **Graduation target:** `12 BNB`
 - **LP token reserve:** `20%`
 - **Pre-grad fee split:** `1% total = 0.7% creator + 0.3% protocol`
+- **Graduation assist:** up to `0.005 BNB` of protocol fees is escrowed as `graduationAssistReserve`; if `state == Bonding314`, `remaining <= 0.005 BNB`, reserve covers the remainder, and the pair health path is still valid, ordinary buy/sell/transfer activity is frozen and anyone can trigger `pokeGraduation()`
+- **Pre-grad transfer policy:** wallet-to-wallet transfers stay disabled until `DEXOnly`; transfers **to** the token contract are allowed and auto-sell
 - **Protocol treasury fallback:** `0xC4187bE6b362DF625696d4a9ec5E6FA461CC0314`
 
 ## Base runtime profile
@@ -46,45 +48,49 @@ It uses the same protocol families and integration surface, but with Base-native
 
 ## Official Base factory
 
-- **Factory:** `0x6fDE83bB814AC79D1267695d532e2Dd9d16A0314`
-- **Factory deployment tx:** `0x66f47b312f40ccff7c22f52bffc0b4610c0c091e42d5ea3409a3e4926b2f6814`
-- **Factory deployment block:** `44505311`
+- **Factory:** `0x95302fb1Aa9cD62F070E512B3d415d8388742a22`
+- **Factory deployment tx:** `0x7f83969f3b8aecec11fc9b2adb98f55703b677e76678b8635973b4abdc7854ce`
+- **Factory deployment block:** `44747121`
 - **Deployment salt:** `0x910c5bb21b8b4100fd60a57155745d3aefb496aa859fc088f8136be56ca8ef31`
 
 ## Official Base support deployers
 
 | Contract | Address | Deployment tx | Block |
 |---|---|---|---|
-| LaunchTokenDeployer | `0xc6611f07a35222095A78Be7fa6e5f5E3B9585e83` | `0x971a8396501b0687b3cc3090c8e413fcc9df5fd0a57ff8d0355d27b2022863d4` | `44504892` |
-| LaunchTokenWhitelistDeployer | `0x502C1605B17E2c0B67Dd4C855E095989945aB3cc` | `0x34972b27827172cef5e3058da9f69a7f596f281412f6e18d4a87f95760e3c20f` | `44505296` |
-| LaunchTokenTaxedDeployer | `0xA45921Dc733188c8C68D017984224E0EC125b095` | `0xb6086624c3eaf66d3011caa02f30c3319c093fd2b932251e84aec202bb27f3e2` | `44505302` |
-| LaunchCreate2Deployer | `0xf0Ef9342fB2866580F4d428E6FF00E5394E15182` | `0xaf3eb01d437c08bea997c039492e1bb51e2c546988e2e02c7f16986526075920` | `44505306` |
+| LaunchTokenDeployer | `0xEf6e2A4012012782520636f92411360Eef04e85F` | `0x42276e0768de38e285818c17755dda60dc6f89acd5e3aadf3ea5962633b7b7b7` | `44747109` |
+| Whitelist LaunchCreate2Deployer | `0x7DC13A23cE2Ec1C0958a0edc9B2f48fB9B953Bf8` | `0x387c963aaf5b1a1b5f6c9e38e709dc1a13c393d8f6a3719431c160627fe4f4ad` | `44747112` |
+| LaunchTokenTaxedDeployer | `0xD7d6cc1dD8ad78759b45243722dBb2be548a02b4` | `0x95d137375a88d8679226dfd00182006859bcdeac87ca3a2f5aae94e273450a4c` | `44747114` |
+| WhitelistTaxed LaunchCreate2Deployer | `0x493F48a18C1c63D2B33bA0883FA85FF044bB70B6` | `0x2ae6c0300a23052b6e52a1f654106ba58fa02a86b5d4bea33576b91dce11d44b` | `44747117` |
 
 ### Base Create2 bind
 
-- **Whitelist-taxed deployer bind tx:** `0xe51199a3da00cbd95c019c88f201ad390644f12393d4705bb3b2d4a3cdcc4341`
-- **Whitelist-taxed deployer bind block:** `44505314`
+- **Whitelist deployer bind tx:** `0xf147c80ae12331194aff5d082aa4079e21632986f9076c59ff0612bf02a8815d`
+- **Whitelist deployer bind block:** `44747123`
+- **Whitelist-taxed deployer bind tx:** `0x21aeed60812888771ba1379ed23d21458b86cde358b71174e563e005492ffb25`
+- **Whitelist-taxed deployer bind block:** `44747125`
 
 ## Official factory
 
-- **Factory:** `0xa5d62930AA7CDD332B6bF1A32dB0cC7095FC0314`
-- **Factory deployment tx:** `0xf77b68c21d31c51f0dbbffb5756f233c9a6718d49f549c262220d92a875afc06`
-- **Factory deployment block:** `91258253`
-- **Deployment salt:** `0xdda123f499c5f7f6d817abb3686e99857361bf6990923787dd4d8c5aef555afd`
+- **Factory:** `0xf264DEf5f915628c57190616931bDf19df2cf225`
+- **Factory deployment tx:** `0xbd39eadf6b753e05b1d4b8f9fb73d61eae9f72f3964026decbaec7aed825cb8a`
+- **Factory deployment block:** `92738992`
+- **Deployment salt:** `0xab555fe56c15787c95b52e9105e2183fbbfe1acdb806cec6fbc39bc7a3c953a0`
 
 ## Official support deployers
 
 | Contract | Address | Deployment tx |
 |---|---|---|
-| LaunchTokenDeployer | `0x8FcAf0Fe7e49245d3f28f04e7b91978aBdD38A71` | `0xe7bf7a28e85e222a5387ef4ae520262217ff65be75d023fa8534c497f4119d36` |
-| LaunchTokenWhitelistDeployer | `0x6E70b0eCcF42D2d8358daD89Fe37cfA1F8c8a9F2` | `0xcd77bf0e98327158f16c1645a9c2f0bc8b6c5589862ecc8344ef831723856140` |
-| LaunchTokenTaxedDeployer | `0x9a5CD709C9B0a18bD7BD5C8a2f637cbE5087D1B9` | `0x29e4824246581158804daa1d86aaba675f04f1e497166eac9961872f394bdd82` |
-| LaunchCreate2Deployer | `0xcDc3D935b2349CF282e5517a8126B0fA890631e5` | `0x18bc4724f5275a3fc4fd2e4c476c9e8c1d140b5a4d3eceffbdec8e8d5e024260` |
+| LaunchTokenDeployer | `0x4A4b56885738A950F245F852143Dd75301B5c0dA` | `0x439bf06a068baceea7b6e7489bb3af176ee82b6fe78896c57391f8b622ffb861` |
+| Whitelist LaunchCreate2Deployer | `0x4099ed5E06F4a8DfCFE05207f60ed520Cfa2e99c` | `0x92a6a5e3f0dfd619e03fe6c160ad84253ec2c90348b9f2192741a54161e7cf77` |
+| LaunchTokenTaxedDeployer | `0x5CE6613F6640341d7440FD7c2Bb477BB0c91899E` | `0x2d63f031c300677e79a7c12c7a1e9494c0844af982d97166487e02ffcbf606c1` |
+| WhitelistTaxed LaunchCreate2Deployer | `0x35758F11Eafa76B5cdFCf73d8495FB5D87446646` | `0xa3b954a5ce6e8da9ba89d8ba4dc54ce89732f7a279fa035f83c63adf95a761b5` |
 
 ### Create2 bind
 
-- **Whitelist-taxed deployer bind tx:** `0xa61eb496afb880fda09cb5f5915905cb72a912eb1f1dc78fd4c4908a460a4ab1`
-- **Whitelist-taxed deployer bind block:** `91258260`
+- **Whitelist deployer bind tx:** `0xe162b6454dd5567e0c5b1021368a388099bb8c81ae0733c05405e5f2353658ea`
+- **Whitelist deployer bind block:** `92738997`
+- **Whitelist-taxed deployer bind tx:** `0x26e7f605dca41203a1bc94da7fdbf8ad5e2946f058b840355c4b37f134dde01a`
+- **Whitelist-taxed deployer bind block:** `92739010`
 
 ## Curve profile
 
@@ -95,7 +101,7 @@ The official `12 BNB` profile uses:
 
 ## Verification status
 
-As of **2026-04-08**, the official BSC factory and all four BSC support deployers are verified via:
+As of **2026-04-15**, the current official BSC and Base factories plus all four current support deployers on each chain are tracked here for source verification bootstrap and explorer matching.
 
 - **Sourcify**
 - **BscScan / Etherscan-compatible explorer**

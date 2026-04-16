@@ -2,19 +2,19 @@ import crypto from "crypto";
 import { ethers, network } from "hardhat";
 
 const DEFAULT_CREATE2_DEPLOYER = "0x4e59b44847b379578588920cA78FbF26c0B4956C";
-const DEFAULT_ROUTER = "0x10ED43C718714eb63d5aA57B78B54704E256024E";
+const DEFAULT_ROUTER = "0x4a012af2b05616Fb390ED32452641C3F04633bb5";
 const DEFAULT_PROTOCOL_RECIPIENT = "0xC4187bE6b362DF625696d4a9ec5E6FA461CC0314";
 const DEFAULT_OWNER = DEFAULT_PROTOCOL_RECIPIENT;
-const DEFAULT_STANDARD_CREATE_FEE = "0.01";
-const DEFAULT_WHITELIST_CREATE_FEE = "0.03";
-const DEFAULT_GRADUATION_TARGET = "12";
+const DEFAULT_STANDARD_CREATE_FEE = "0.005";
+const DEFAULT_WHITELIST_CREATE_FEE = "0.01";
+const DEFAULT_GRADUATION_TARGET = "4";
 const DEFAULT_SUFFIX = "0314";
-const BSC_WHITELIST_THRESHOLDS = [ethers.parseEther("4"), ethers.parseEther("6"), ethers.parseEther("8")];
-const BSC_WHITELIST_SLOT_SIZES = [
+const BASE_WHITELIST_THRESHOLDS = [ethers.parseEther("1"), ethers.parseEther("2"), ethers.parseEther("3")];
+const BASE_WHITELIST_SLOT_SIZES = [
+  ethers.parseEther("0.04"),
   ethers.parseEther("0.1"),
   ethers.parseEther("0.2"),
-  ethers.parseEther("0.5"),
-  ethers.parseEther("1")
+  ethers.parseEther("0.5")
 ];
 
 function optionalAddress(value: string | undefined) {
@@ -41,7 +41,7 @@ function requiredEther(value: string | undefined, fallback: string, label: strin
 function requiredSuffix(value: string | undefined, fallback: string) {
   const suffix = (value && value.trim() ? value : fallback).toLowerCase();
   if (!/^[0-9a-f]+$/.test(suffix)) {
-    throw new Error("Invalid BSC_FACTORY_SUFFIX");
+    throw new Error("Invalid BASE_FACTORY_SUFFIX");
   }
   return suffix;
 }
@@ -186,57 +186,57 @@ async function deploySupportDeployer(
 
 async function main() {
   const create2Deployer = requiredAddress(
-    process.env.BSC_CREATE2_DEPLOYER,
+    process.env.BASE_CREATE2_DEPLOYER,
     DEFAULT_CREATE2_DEPLOYER,
-    "BSC_CREATE2_DEPLOYER"
+    "BASE_CREATE2_DEPLOYER"
   );
-  const owner = requiredAddress(process.env.BSC_FACTORY_OWNER, DEFAULT_OWNER, "BSC_FACTORY_OWNER");
-  const router = requiredAddress(process.env.BSC_FACTORY_ROUTER, DEFAULT_ROUTER, "BSC_FACTORY_ROUTER");
+  const owner = requiredAddress(process.env.BASE_FACTORY_OWNER, DEFAULT_OWNER, "BASE_FACTORY_OWNER");
+  const router = requiredAddress(process.env.BASE_FACTORY_ROUTER, DEFAULT_ROUTER, "BASE_FACTORY_ROUTER");
   const protocolFeeRecipient = requiredAddress(
-    process.env.BSC_PROTOCOL_FEE_RECIPIENT,
+    process.env.BASE_PROTOCOL_FEE_RECIPIENT,
     DEFAULT_PROTOCOL_RECIPIENT,
-    "BSC_PROTOCOL_FEE_RECIPIENT"
+    "BASE_PROTOCOL_FEE_RECIPIENT"
   );
   const standardCreateFee = requiredEther(
-    process.env.BSC_STANDARD_CREATE_FEE_NATIVE ?? process.env.BSC_CREATE_FEE_NATIVE,
+    process.env.BASE_STANDARD_CREATE_FEE_NATIVE ?? process.env.BASE_CREATE_FEE_NATIVE,
     DEFAULT_STANDARD_CREATE_FEE,
-    "BSC_STANDARD_CREATE_FEE_NATIVE"
+    "BASE_STANDARD_CREATE_FEE_NATIVE"
   );
   const whitelistCreateFee = requiredEther(
-    process.env.BSC_WHITELIST_CREATE_FEE_NATIVE,
+    process.env.BASE_WHITELIST_CREATE_FEE_NATIVE,
     DEFAULT_WHITELIST_CREATE_FEE,
-    "BSC_WHITELIST_CREATE_FEE_NATIVE"
+    "BASE_WHITELIST_CREATE_FEE_NATIVE"
   );
   const graduationTarget = requiredEther(
-    process.env.BSC_GRADUATION_TARGET_NATIVE,
+    process.env.BASE_GRADUATION_TARGET_NATIVE,
     DEFAULT_GRADUATION_TARGET,
-    "BSC_GRADUATION_TARGET_NATIVE"
+    "BASE_GRADUATION_TARGET_NATIVE"
   );
-  const desiredSuffix = requiredSuffix(process.env.BSC_FACTORY_SUFFIX, DEFAULT_SUFFIX);
-  const dryRun = process.env.BSC_DEPLOY_DRY_RUN === "1";
+  const desiredSuffix = requiredSuffix(process.env.BASE_FACTORY_SUFFIX, DEFAULT_SUFFIX);
+  const dryRun = process.env.BASE_DEPLOY_DRY_RUN === "1";
   const provider = ethers.provider;
   const deployerPrivateKey =
-    optionalPrivateKey(process.env.BSC_DEPLOYER_PRIVATE_KEY) ??
+    optionalPrivateKey(process.env.BASE_DEPLOYER_PRIVATE_KEY) ??
     optionalPrivateKey(process.env.DEPLOYER_PRIVATE_KEY);
   const deployer = deployerPrivateKey
     ? new ethers.Wallet(deployerPrivateKey, provider)
     : (await ethers.getSigners())[0];
   const networkInfo = await provider.getNetwork();
 
-  if (!dryRun && network.name !== "bsc") {
-    throw new Error(`Refusing to broadcast on network "${network.name}". Use --network bsc or set BSC_DEPLOY_DRY_RUN=1.`);
+  if (!dryRun && network.name !== "base") {
+    throw new Error(`Refusing to broadcast on network "${network.name}". Use --network base or set BASE_DEPLOY_DRY_RUN=1.`);
   }
-  if (!dryRun && networkInfo.chainId !== 56n) {
-    throw new Error(`Unexpected chainId ${networkInfo.chainId}. Expected 56 for BSC mainnet.`);
+  if (!dryRun && networkInfo.chainId !== 8453n) {
+    throw new Error(`Unexpected chainId ${networkInfo.chainId}. Expected 8453 for Base mainnet.`);
   }
 
   const startNonce = await provider.getTransactionCount(deployer.address, "latest");
   const nonceCursor = { value: BigInt(startNonce) };
 
-  const configuredStandardDeployer = optionalAddress(process.env.BSC_STANDARD_DEPLOYER_ADDRESS);
-  const configuredWhitelistDeployer = optionalAddress(process.env.BSC_WHITELIST_DEPLOYER_ADDRESS);
-  const configuredTaxedDeployer = optionalAddress(process.env.BSC_TAXED_DEPLOYER_ADDRESS);
-  const configuredWhitelistTaxedDeployer = optionalAddress(process.env.BSC_WHITELIST_TAXED_DEPLOYER_ADDRESS);
+  const configuredStandardDeployer = optionalAddress(process.env.BASE_STANDARD_DEPLOYER_ADDRESS);
+  const configuredWhitelistDeployer = optionalAddress(process.env.BASE_WHITELIST_DEPLOYER_ADDRESS);
+  const configuredTaxedDeployer = optionalAddress(process.env.BASE_TAXED_DEPLOYER_ADDRESS);
+  const configuredWhitelistTaxedDeployer = optionalAddress(process.env.BASE_WHITELIST_TAXED_DEPLOYER_ADDRESS);
 
   const standardDeployer = await deploySupportDeployer(
     "LaunchTokenDeployer",
@@ -287,8 +287,8 @@ async function main() {
     standardCreateFee,
     whitelistCreateFee,
     graduationTarget,
-    whitelistThresholdPresets: BSC_WHITELIST_THRESHOLDS,
-    whitelistSlotSizePresets: BSC_WHITELIST_SLOT_SIZES
+    whitelistThresholdPresets: BASE_WHITELIST_THRESHOLDS,
+    whitelistSlotSizePresets: BASE_WHITELIST_SLOT_SIZES
   });
 
   const initCode = deployTxRequest.data;
@@ -297,11 +297,11 @@ async function main() {
   }
   const initCodeHash = ethers.keccak256(initCode);
 
-  const providedSalt = process.env.BSC_FACTORY_CREATE2_SALT?.trim()
-    ? requiredHex32(process.env.BSC_FACTORY_CREATE2_SALT, "BSC_FACTORY_CREATE2_SALT")
+  const providedSalt = process.env.BASE_FACTORY_CREATE2_SALT?.trim()
+    ? requiredHex32(process.env.BASE_FACTORY_CREATE2_SALT, "BASE_FACTORY_CREATE2_SALT")
     : null;
-  const expectedFactoryAddressFromEnv = process.env.BSC_EXPECTED_FACTORY_ADDRESS?.trim()
-    ? ethers.getAddress(process.env.BSC_EXPECTED_FACTORY_ADDRESS.trim())
+  const expectedFactoryAddressFromEnv = process.env.BASE_EXPECTED_FACTORY_ADDRESS?.trim()
+    ? ethers.getAddress(process.env.BASE_EXPECTED_FACTORY_ADDRESS.trim())
     : null;
 
   const vanity =
@@ -329,6 +329,8 @@ async function main() {
     standardCreateFee: ethers.formatEther(standardCreateFee),
     whitelistCreateFee: ethers.formatEther(whitelistCreateFee),
     graduationTarget: ethers.formatEther(graduationTarget),
+    whitelistThresholdPresets: BASE_WHITELIST_THRESHOLDS.map((value) => ethers.formatEther(value)),
+    whitelistSlotSizePresets: BASE_WHITELIST_SLOT_SIZES.map((value) => ethers.formatEther(value)),
     supportDeployers: {
       standardDeployer: standardDeployer.address,
       whitelistDeployer: whitelistDeployer.address,

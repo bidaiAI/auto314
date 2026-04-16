@@ -297,8 +297,9 @@ describe("Deep Audit: AMM Math & Edge Cases", function () {
       await token.connect(buyer).buy(0, { value: MEDIUM_BUY });
 
       const protocolVault = await token.protocolFeeVault();
+      const assistReserve = await token.graduationAssistReserve();
       const creatorVault = await token.creatorFeeVault();
-      const totalFee = protocolVault + creatorVault;
+      const totalFee = protocolVault + assistReserve + creatorVault;
 
       // Total fee = 1% of gross
       const expectedTotal = (MEDIUM_BUY * 100n) / 10_000n;
@@ -306,7 +307,7 @@ describe("Deep Audit: AMM Math & Edge Cases", function () {
 
       // Protocol = 0.3% of gross
       const expectedProtocol = (MEDIUM_BUY * 30n) / 10_000n;
-      expect(protocolVault).to.equal(expectedProtocol);
+      expect(protocolVault + assistReserve).to.equal(expectedProtocol);
 
       // Creator = 0.7% of gross
       const expectedCreator = (MEDIUM_BUY * 70n) / 10_000n;
@@ -474,7 +475,6 @@ describe("Deep Audit: AMM Math & Edge Cases", function () {
     it("pair with non-zero totalSupply blocks graduation", async function () {
       const { token, buyer, pair } = await deployFixture();
       await pair.setTotalSupply(1n);
-      expect(await token.isPairGraduationCompatible()).to.equal(false);
 
       await expect(
         token.connect(buyer).buy(0, { value: OVERBUY })

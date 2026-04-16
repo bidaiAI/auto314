@@ -535,9 +535,10 @@ This starts a local Hardhat chain, deploys a demo factory with a `0.2 native` gr
 ## Official BSC deployment
 
 - **Canonical public reference:** [`docs/OFFICIAL_PARAMETERS.md`](./docs/OFFICIAL_PARAMETERS.md)
-- **Factory:** `0xa5d62930AA7CDD332B6bF1A32dB0cC7095FC0314`
+- **Factory:** `0xf264DEf5f915628c57190616931bDf19df2cf225`
 - **Modes:** `0314 / b314 / 1314..9314 / f314`
 - **Graduation target:** `12 BNB`
+- **Tail handling:** new factories escrow up to `0.005 native` as a graduation-assist reserve; once the launch enters the final `0.005 native` assist window, ordinary buy/sell/transfer activity is frozen and anyone can complete graduation with `pokeGraduation()`. Before that window, `transfer(tokenContract, amount)` / `transferFrom(..., tokenContract, amount)` auto-sell during `Bonding314` while normal wallet-to-wallet transfers remain blocked until `DEXOnly`
 
 Use the official parameters page above for the current factory, deployers, deployment txs/blocks, curve profile, channels, and verification status.
 
