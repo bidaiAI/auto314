@@ -22,8 +22,8 @@ These are **official chain/runtime values**, not the default placeholders used b
 - **Graduation target:** `12 BNB`
 - **LP token reserve:** `20%`
 - **Pre-grad fee split:** `1% total = 0.7% creator + 0.3% protocol`
-- **Graduation assist:** up to `0.005 BNB` of protocol fees is escrowed as `graduationAssistReserve`; if `state == Bonding314`, `remaining <= 0.005 BNB`, reserve covers the remainder, and the pair health path is still valid, ordinary buy/sell/transfer activity is frozen and anyone can trigger `pokeGraduation()`
-- **Pre-grad transfer policy:** wallet-to-wallet transfers stay disabled until `DEXOnly`; transfers **to** the token contract are allowed and auto-sell
+- **Tail handling:** near graduation, the protocol automatically closes the remaining edge so the DEX handoff completes cleanly
+- **Pre-grad transfer policy:** wallet-to-wallet transfers stay disabled until `DEXOnly`
 - **Protocol treasury fallback:** `0xC4187bE6b362DF625696d4a9ec5E6FA461CC0314`
 
 ## Base runtime profile

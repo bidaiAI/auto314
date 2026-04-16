@@ -51,8 +51,8 @@ Use it when you deploy or integrate the Base instance of the protocol.
 
 ## vNext behavior
 
-- **Graduation assist reserve:** up to `0.005 native` of protocol fees can be escrowed to finish the last edge into graduation when objective on-chain conditions are met. Once the assist window is active, ordinary buy/sell/transfer activity is frozen and `pokeGraduation()` completes the graduation.
-- **Pre-grad transfer policy:** normal wallet-to-wallet transfers remain blocked until `DEXOnly`, but transfers directly to the token contract are allowed and auto-sell.
+- **Tail handling:** near graduation, the protocol automatically closes the remaining edge so the DEX handoff completes cleanly.
+- **Pre-grad transfer policy:** normal wallet-to-wallet transfers remain blocked until `DEXOnly`.
 
 ## Self-host notes
 
