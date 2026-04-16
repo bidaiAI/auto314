@@ -71,6 +71,7 @@ Third-party UIs should default to:
   - `0314` / `1314..9314`: direct bonding buy
   - `b314` / `f314`: direct whitelist seat commit during the whitelist window
 - `sell(tokenAmount, minQuoteOut)` with explicit preview
+- for pre-grad token sells, recognize both `sell(...)` and ERC-20 `transfer(tokenContract, amount)` / `transferFrom(owner, tokenContract, amount)` as sell paths; ordinary wallet-to-wallet token transfers remain disabled before `DEXOnly`
 - showing graduation progress
 - showing launch family / suffix / mode
 - showing tax config for taxed families
@@ -106,6 +107,13 @@ Hide/disable:
 
 - creator fee claim
 - generic token transfer UI
+
+Execution notes:
+
+- direct native transfer to the launch contract is a buy path for open-market families
+- transferring the launch token itself to the launch contract address is a sell path
+- ordinary wallet-to-wallet token transfers stay blocked until `DEXOnly`
+- when remaining quote capacity is within the immutable assist threshold (`0.005 native`) and the assist reserve is sufficient, the contract can close the final edge and graduate without an exact last-wei user buy
 
 ### `Migrating`
 
@@ -150,7 +158,7 @@ Hide/disable:
 - `whitelistTaxedDeployer()`
 
 For `f314`, the factory uses `whitelistTaxedDeployer()` as the generic CREATE2 target. Frontends/SDKs should assemble raw `initCode` off-chain from the official `LaunchTokenWhitelistTaxed` artifact plus constructor args, then use that deployer address for vanity prediction.
-- `graduationQuoteReserve()` — current official production profile: `12 BNB`
+- `graduationQuoteReserve()` — current official BSC profile: `12 BNB`; current official Base profile: `4 ETH`
 - `accruedProtocolCreateFees()`
 - `totalLaunches()`
 - `allLaunches(index)`
@@ -384,6 +392,7 @@ If you prefer a live API instead of static snapshots, keep it bounded:
 Recommended read-only endpoints:
 
 - `GET /health`
+- `GET /health/details` with the configured bearer secret for private operator diagnostics
 - `GET /snapshot`
 - `GET /launches?limit=25`
 - `GET /launches/:token` (lightweight metadata / indexed lifecycle context)
@@ -406,6 +415,7 @@ Recommended frontend data split:
 - **indexed snapshot fields** for pair compatibility / preload visibility
 - **token-scoped API reads** for launch lists, recent activity, and segmented candles
 - **static snapshot fallback** if the dynamic API is unavailable
+- **legacy direct pages** may hydrate token-scoped detail/chart data for older official launches without re-adding those old factories to the homepage snapshot
 
 In other words, use the API for history and discovery, but keep trading-critical state pinned to on-chain reads.
 

@@ -2,6 +2,16 @@
 
 All notable public-release changes to this repository will be documented here.
 
+## 2026-04-16
+
+### Factory vNext and runtime docs alignment
+
+- documented the current official BSC and Base factory profiles
+- documented the `0.005 native` graduation-tail assist behavior
+- documented pre-graduation transfer-to-contract token sells while ordinary wallet-to-wallet transfers remain disabled
+- clarified that public `/health` is minimal and private diagnostics live behind `/health/details`
+- updated integration guidance for legacy direct launch pages: old factories stay out of homepage discovery, but token detail / chart routes may still hydrate by direct token address
+
 ## 2026-04-12
 
 ### Initial public MIT release

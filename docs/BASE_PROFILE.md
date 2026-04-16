@@ -1,6 +1,6 @@
 # Autonomous 314 — Base Runtime Profile
 
-Last updated: **2026-04-15**
+Last updated: **2026-04-16**
 
 This page documents the **Base chain deployment profile** for Autonomous 314.
 
@@ -51,8 +51,8 @@ Use it when you deploy or integrate the Base instance of the protocol.
 
 ## vNext behavior
 
-- **Tail handling:** near graduation, the protocol automatically closes the remaining edge so the DEX handoff completes cleanly.
-- **Pre-grad transfer policy:** normal wallet-to-wallet transfers remain blocked until `DEXOnly`.
+- **Tail handling:** when remaining quote capacity is at most `0.005 ETH` and the assist reserve covers it, the protocol closes the final edge so the DEX handoff completes cleanly.
+- **Pre-grad transfer policy:** normal wallet-to-wallet transfers remain blocked until `DEXOnly`; transferring the launch token to its own contract address before graduation is treated as a sell into the internal market.
 
 ## Self-host notes
 

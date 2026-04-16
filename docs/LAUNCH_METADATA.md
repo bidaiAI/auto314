@@ -63,7 +63,7 @@ The reference frontend now supports:
 
 - description input
 - image URL input
-- local image upload for preview/export
+- local image upload with wallet-signed upload authorization when the protected reference upload path is enabled
 - website / X / Telegram / Discord fields
 - inline `data:` JSON metadata for lightweight launches
 - metadata JSON download for manual publishing to IPFS/R2
@@ -71,7 +71,7 @@ The reference frontend now supports:
 ## Recommended production flow
 
 1. Fill out the launch form.
-2. Publish the metadata JSON to a permanent URI.
+2. Publish the metadata JSON to a permanent URI, or use the protected reference upload path if your deployment has enabled it.
 3. Paste that URI into the create form.
 4. Submit `createLaunchWithSalt(...)`.
 

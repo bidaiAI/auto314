@@ -363,6 +363,7 @@ The protocol intentionally keeps **native transfer entrypoints** for the familie
 
 - `0314` and `1314..9314`: before graduation, direct native transfer to the launch contract is a valid bonding-phase buy path
 - `b314` and `f314`: direct native transfer during the whitelist window is a valid fixed-seat commit path, but only when the amount exactly matches the configured seat size
+- all 314 launch families: before graduation, transferring the launch token itself to the launch contract address is treated as an explicit sell back into the internal market; ordinary wallet-to-wallet transfers remain blocked
 - whitelist launches are **seat-based**, not proportional by contribution size: one approved seat equals one equal allocation once the threshold is met
 - after graduation, sending native tokens to the launch contract or transferring the token back to the launch contract will revert rather than auto-refund
 
@@ -376,6 +377,7 @@ One of the protocol's design goals is not to reinforce platform-led extraction f
 - **protocol share**: `0.3%` (internal pre-grad market only)
 - **standard/taxed create fee**: `0.01 native`
 - **whitelist/whitelist-tax create fee**: `0.03 native`
+- **graduation tail close:** when the remaining quote capacity is at most `0.005 native` and the accrued assist reserve can cover it, the contract closes the final edge and graduates without requiring a user to hit the exact last wei
 
 This means the protocol keeps a small sustainability fee during the internal pre-grad market while routing the majority of that fee back toward the project side.
 

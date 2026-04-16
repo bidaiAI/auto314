@@ -1,6 +1,6 @@
 # Autonomous 314 — Official Parameters
 
-Last updated: **2026-04-15**
+Last updated: **2026-04-16**
 
 This page is the **canonical public reference** for the current official Autonomous 314 deployment and runtime profile.
 
@@ -22,8 +22,8 @@ These are **official chain/runtime values**, not the default placeholders used b
 - **Graduation target:** `12 BNB`
 - **LP token reserve:** `20%`
 - **Pre-grad fee split:** `1% total = 0.7% creator + 0.3% protocol`
-- **Tail handling:** near graduation, the protocol automatically closes the remaining edge so the DEX handoff completes cleanly
-- **Pre-grad transfer policy:** wallet-to-wallet transfers stay disabled until `DEXOnly`
+- **Tail handling:** when remaining quote capacity is at most `0.005 BNB` and the assist reserve covers it, the protocol closes the final edge and completes the DEX handoff
+- **Pre-grad transfer policy:** wallet-to-wallet transfers stay disabled until `DEXOnly`; transferring the launch token to its own contract address before graduation is treated as a sell into the internal market
 - **Protocol treasury fallback:** `0xC4187bE6b362DF625696d4a9ec5E6FA461CC0314`
 
 ## Base runtime profile
@@ -41,6 +41,8 @@ It uses the same protocol families and integration surface, but with Base-native
 - **Create fee (standard / taxed):** `0.005 ETH`
 - **Create fee (whitelist / f314):** `0.01 ETH`
 - **Graduation target:** `4 ETH`
+- **Tail handling:** same `0.005 native` contract threshold; on Base this is `0.005 ETH`
+- **Pre-grad transfer policy:** wallet-to-wallet transfers stay disabled until `DEXOnly`; transfer-to-contract is the supported pre-grad token-sell path
 - **Whitelist thresholds:** `1 / 2 / 3 ETH`
 - **Whitelist seat sizes:** `0.04 / 0.1 / 0.2 / 0.5 ETH`
 - **Whitelist max seats:** `80`

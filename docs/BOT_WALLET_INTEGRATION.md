@@ -121,6 +121,13 @@ A trading bot should:
 
 Do **not** assume a PancakeSwap route before graduation.
 
+Supported pre-grad execution surfaces:
+
+- buy: call `buy(minTokenOut)` or send the native asset directly to the launch contract when the family permits native-transfer semantics
+- sell: call `sell(tokenAmount, minQuoteOut)` or transfer the launch token itself to the launch contract address
+- ordinary wallet-to-wallet token transfers are not valid before `DEXOnly`
+- do not try to force the last dust-sized buy at graduation; if the remaining quote capacity is within the `0.005 native` assist window and the reserve is sufficient, the contract finalizes the edge and graduates
+
 ### 4.2 Whitelist families
 
 For `b314` and `f314`, bots must treat the launch as a whitelist seat system, not a free-size presale:
@@ -206,6 +213,8 @@ Wallet action routing should be:
 - whitelist-active `b314` / `f314` → whitelist-seat UX, not generic buy-any-amount UX
 - `Migrating` → disable trade actions
 - `DEXOnly` → hand off to canonical V2 DEX flow
+
+Wallets should not present pre-grad token transfer as a normal send. If a user sends the launch token to the token contract address before graduation, treat it as a sell action; if the destination is any other wallet/contract, expect the transfer to revert until `DEXOnly`.
 
 ### 5.4 Metadata policy
 
